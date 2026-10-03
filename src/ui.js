@@ -205,6 +205,12 @@ export class UI {
     this.pauseBtn.classList.toggle('active', this.app.paused);
   }
 
+  setHidden(hidden) {
+    this.root.classList.toggle('hidden', hidden);
+    this.app.panelShift = !hidden;
+    this.app.resize();
+  }
+
   _keys() {
     window.addEventListener('keydown', (e) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
@@ -217,7 +223,7 @@ export class UI {
       else if (k === 'c') this.app.clearBalls();
       else if (k === 's') { this.app.cup.shake = 1.6; this.app.cup.shakeT = 0; }
       else if (k === 'p' || k === ' ') { this.togglePause(); e.preventDefault(); }
-      else if (k === 'h') this.root.classList.toggle('hidden');
+      else if (k === 'h') this.setHidden(!this.root.classList.contains('hidden'));
       else if (k === 'd') { this.app.debugMode = (this.app.debugMode + 1) % 5; }
     });
   }

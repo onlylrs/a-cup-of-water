@@ -375,8 +375,8 @@ vec3 traceCup(vec3 camLocal, vec3 rd) {
         float u = atan(p.z, p.x) / TAU;
         vec4 cond = texture(uCond, vec2(u, p.y / CUP_H));
         float hz = max((1.0 - exp(-1.8 * cond.g)) * 0.85, smoothstep(0.0, 1.0, cond.r * 0.55));
-        col += deferBackground(p, dOut, thr * (1.0 - hz));
-        col += thr * hz * (envDiffuse(dOut) * 0.75 + vec3(0.02));
+        col += deferBackground(p, dOut, thr * (1.0 - hz * 0.5));
+        col += thr * hz * (envDiffuse(dOut) * 0.9 + vec3(0.03));
         break;
       } else if (t == tIn) {
         vec3 ni = vec3(p.x, 0.0, p.z) / R_IN;

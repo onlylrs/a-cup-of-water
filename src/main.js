@@ -184,6 +184,7 @@ class App {
 
     // ---------------- render targets
     this.targets = null;
+    this.panelShift = true;
     this.resize();
     window.addEventListener('resize', () => this.resize());
 
@@ -204,7 +205,7 @@ class App {
     this.renderer.setSize(w, h);
     this.camera.aspect = w / h;
     // keep the glass centred in the area left free by the control panel
-    const shift = w > 900 ? 160 : 0;
+    const shift = !this.panelShift ? 0 : w > 900 ? 160 : w > 600 ? 135 : 0;
     if (shift) this.camera.setViewOffset(w, h, shift, 0, w, h);
     else this.camera.clearViewOffset();
     this.camera.updateProjectionMatrix();
@@ -540,7 +541,7 @@ window.app = app;
   const num = (k) => (q.has(k) ? q.get(k).split(',').map(Number) : null);
   const cam = num('cam');
   if (cam) app.view(cam.slice(0, 3), cam.length >= 6 ? cam.slice(3, 6) : undefined);
-  if (q.get('ui') === '0') document.getElementById('ui').classList.add('hidden');
+  if (q.get('ui') === '0') app.ui.setHidden(true);
   if (q.has('temp')) app.ui.setSource(+q.get('temp'));
   if (q.has('ts')) app.thermal.timeScale = +q.get('ts');
   if (q.has('debug')) app.debugMode = +q.get('debug');

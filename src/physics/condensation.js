@@ -59,7 +59,8 @@ void main() {
       // vapour deposits as frost; crystals grow preferentially from existing crystals
       float nb = max(max(texture(uPrev, vUv + vec2(texel.x, 0.0)).g, texture(uPrev, vUv - vec2(texel.x, 0.0)).g),
                      max(texture(uPrev, vUv + vec2(0.0, texel.y)).g, texture(uPrev, vUv - vec2(0.0, texel.y)).g));
-      s.g += rate * (0.004 + 0.06 * nb + 0.14 * seed);
+      // vapour must diffuse through the porous layer, so a thick deposit grows more slowly
+      s.g += rate * (0.02 + 0.08 * nb + 0.05 * seed) / (1.0 + 8.0 * s.g * s.g * s.g);
       float fz = min(s.r, uDt * 1.5);
       s.r -= fz; s.g += fz * 0.7;
       // standing droplets freeze in place

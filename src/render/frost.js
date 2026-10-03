@@ -106,21 +106,34 @@ void main() {
   // frost: dendritic crystal layer with view-dependent glints
   if (frost > 0.01) {
     // hoar frost is a porous scattering layer: optical depth ~ thickness, never fully opaque at
-    // the ~0.1-0.5 mm a glass collects; growth is patchy and feathery rather than uniform
+    // the ~0.1-0.5 mm a glass collects. Crystals first appear along branching veins and fill in
+    // between them as the deposit thickens: the frost amount thresholds a domain-warped ridge
+    // pattern, and the grain keeps even a thick layer textured
     float cr = fbm2(s * 1400.0);
-    float patch = fbm2(s * 160.0 + 3.7);
-    float fern = smoothstep(0.35, 0.8, fbm2(vec2(s.x * 900.0 + fbm2(s * 300.0) * 4.0, s.y * 2600.0)));
-    float thick = frost * mix(0.45, 1.25, patch) * mix(0.75, 1.15, cr);
+    float grain = fbm2(s * 3500.0);
+    float patchy = fbm2(s * 220.0 + 3.7);
+    vec2 w = vec2(fbm2(s * 500.0), fbm2(s * 500.0 + 5.2));
+    float vein = pow(1.0 - abs(2.0 * fbm2(s * 1100.0 + w * 2.5) - 1.0), 5.0);
+    float pat = 1.0 - (0.55 * vein + 0.45 * grain);
+    float f = frost * mix(0.8, 1.2, patchy);
+    float cov = smoothstep(pat - 0.18, pat + 0.18, f);
     float grazing = 1.0 - abs(dot(N, V));
-    float a = (1.0 - exp(-thick * (1.6 + 1.4 * grazing))) * 0.86;
-    a += fern * 0.18 * smoothstep(0.1, 0.5, frost);
+    float a = max(cov * mix(0.55, 0.82, grain), (1.0 - exp(-f * 1.5)) * 0.3) * (0.8 + 0.3 * grazing);
     a = clamp(a, 0.0, 0.9);
-    vec3 fN = normalize(N + (vec3(hash12(floor(s * 6000.0)), hash12(floor(s * 6000.0) + 3.1), hash12(floor(s * 6000.0) + 5.3)) - 0.5) * 1.6);
-    float glint = pow(max(0.0, dot(reflect(-V, fN), uLightDir)), 120.0) * step(0.86, hash12(floor(s * 4200.0)));
-    // forward scattering lights the layer from behind as well (the key light is behind the glass)
-    float wrap = 0.35 + 0.4 * max(0.0, dot(N, uLightDir)) + 0.25 * max(0.0, dot(-V, uLightDir));
-    vec3 frostCol = vec3(0.84, 0.88, 0.94) * (amb * 0.9 + uLightColor * wrap * 0.3) * mix(0.8, 1.1, cr);
-    frostCol += uLightColor * glint * 6.0;
+    // sparse facets catch the key light as point glints
+    vec2 gc = s * 2600.0;
+    vec2 gi = floor(gc);
+    float facet = step(0.93, hash12(gi)) * smoothstep(0.3, 0.05, length(fract(gc) - 0.5)) * cov;
+    vec3 fN = normalize(N + (vec3(hash12(gi + 1.7), hash12(gi + 3.1), hash12(gi + 5.3)) - 0.5) * 1.6);
+    float glint = pow(max(0.0, dot(reflect(-V, fN), uLightDir)), 60.0) * facet;
+    // a near-white diffuser: it back-scatters the light in front of it and diffusely transmits
+    // the (heavily blurred) scene behind it, so it is never darker than what it covers; the key
+    // light behind the glass shines through it by forward scattering
+    float fwd = pow(max(0.0, dot(-V, uLightDir)), 3.0);
+    float wrap = 0.3 + 0.4 * max(0.0, dot(N, uLightDir)) + 0.6 * fwd;
+    vec3 behind = blurScene(uv, 5.5);
+    vec3 frostCol = vec3(0.92, 0.95, 1.0) * (amb * 1.2 + uLightColor * wrap * 0.35 + behind * 0.85) * mix(0.82, 1.12, cr * 0.5 + grain * 0.5);
+    frostCol += uLightColor * glint * 5.0;
     col = mix(col, frostCol, a * (1.0 - dc * 0.8));
   }
 
