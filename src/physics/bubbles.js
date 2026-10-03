@@ -262,10 +262,10 @@ export class Bubbles {
     // strong boiling: the many unresolved bubbles also heave the surface
     const boil = thermal.stats.boiling;
     if (this.coupling.surface && boil > 0.05) {
-      const n = Math.floor(boil * boil * 10 + rng());
+      const n = Math.floor(boil * boil * 240 * dt + rng());
       for (let i = 0; i < n; i++) {
         const a = rng() * 6.283, r = Math.sqrt(rng()) * CUP.rIn * 0.95;
-        env.waves.addImpulse(Math.cos(a) * r, Math.sin(a) * r, 0.0015 + rng() * 0.002, -(0.0002 + rng() * 0.0005) * boil);
+        env.waves.addImpulse(Math.cos(a) * r, Math.sin(a) * r, 0.0015 + rng() * 0.002, -(0.00015 + rng() * 0.0003) * boil);
       }
     }
     this._upload();
@@ -273,7 +273,7 @@ export class Bubbles {
 
   _burst(b, env) {
     this.bursts++;
-    const amp = Math.min(0.0025, b.R * 0.9);
+    const amp = Math.min(0.0018, b.R * 0.7);
     if (this.coupling.surface) {
       env.waves.addImpulse(b.x, b.z, Math.max(0.0012, b.R * 1.4), -amp);
       env.waves.addImpulse(b.x, b.z, Math.max(0.0024, b.R * 2.8), amp * 0.22);

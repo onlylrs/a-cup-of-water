@@ -75,9 +75,9 @@ void main() {
   }
   add *= 1.0 - rigid;
   hn += add; h += add;
-  // safety: the linear model is meaningless beyond a few cm; never let a NaN persist
-  hn = clamp(hn, h - 0.004, h + 0.004);
-  hn = clamp(hn, -0.02, 0.02); h = clamp(h, -0.02, 0.02);
+  // safety (heights are in mm): the linear model is meaningless beyond ~2 cm; never let a NaN persist
+  hn = clamp(hn, h - 4.0, h + 4.0);
+  hn = clamp(hn, -20.0, 20.0); h = clamp(h, -20.0, 20.0);
   if (isnan(hn) || isnan(h)) { hn = 0.0; h = 0.0; }
   fragColor = vec4(hn, h, 0.0, 1.0);
 }
@@ -211,7 +211,7 @@ export class Waves {
     this.setTemperature(20);
     this.simTime = 0;
     this.carry = 0;
-    this.maxSubsteps = 64;
+    this.maxSubsteps = 100;
     this.clear();
   }
 
@@ -228,10 +228,15 @@ export class Waves {
 
   setTemperature(T) {
     const { c2, beta, sigma, rho } = fitDispersion(T);
-    const nu = kinematicViscosity(Math.max(0, T));
+    // real surfaces carry a surfactant film whose elasticity damps mm-scale ripples beyond bulk
+    // viscosity (Marangoni damping); modelled as extra effective viscosity. It also keeps the
+    // grid-scale modes damped in hot, low-viscosity water.
+    const nu = kinematicViscosity(Math.max(0, T)) + 0.6e-6;
     const dx = this.dx;
     const wmax = Math.sqrt(c2 * 8 / (dx * dx) + beta * 64 / dx ** 4);
-    this.params = { c2, beta, nu, dtSub: 1.55 / wmax, sigma, rho };
+    // leapfrog is stable for w*dt < 2 on a periodic grid; the mirrored ghost cells at the curved
+    // wall lag one step and need a wider margin
+    this.params = { c2, beta, nu, dtSub: 1.0 / wmax, sigma, rho };
     const u = this.stepPass.material.uniforms;
     u.uC2.value = c2; u.uBeta.value = beta; u.uNu.value = nu;
     const lc = capillaryLength(T);

@@ -13,6 +13,8 @@ import { BALL_TYPES } from './materials.js';
 const TABLE_HALF = 0.42;
 const _v = new THREE.Vector3();
 const _q = new THREE.Quaternion();
+const RING_C = [0, 1, 2, 3, 4, 5].map((k) => Math.cos(k * Math.PI / 3));
+const RING_S = [0, 1, 2, 3, 4, 5].map((k) => Math.sin(k * Math.PI / 3));
 const AXES = [[1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1], [0, -1, 0], [0, 1, 0],
   [0.707, -0.707, 0], [-0.707, -0.707, 0], [0, -0.707, 0.707], [0, -0.707, -0.707]];
 
@@ -56,6 +58,7 @@ export class Bodies {
     this.coupling = { waves: true, ice: true, bubbles: true };
     this._f = [0, 0];
     this._s = [0, 0];
+    this._s2 = [0, 0, 0, 0];
   }
 
   add(typeIndex, pos) {
@@ -106,6 +109,20 @@ export class Bodies {
     const insideCup = rLocal < CUP.rIn && ly - b.r < CUP.level + 0.03 && ly > CUP.base - 0.01;
     if (insideCup) {
       const surf = env.surface(lx, lz, this._s);
+      // pressure acts over the whole wetted surface, so ripples shorter than the body average
+      // out: use the mean height and least-squares slope over a ring at the waterline
+      {
+        const rr = b.r * 0.75;
+        let se = surf[0], sx = 0, sz = 0;
+        for (let k = 0; k < 6; k++) {
+          const c = RING_C[k], s = RING_S[k];
+          const e = env.surface(lx + c * rr, lz + s * rr, this._s2)[0];
+          se += e; sx += e * c; sz += e * s;
+        }
+        surf[0] = se / 7;
+        surf[2] = THREE.MathUtils.clamp(sx / (3 * rr), -0.6, 0.6);
+        surf[3] = THREE.MathUtils.clamp(sz / (3 * rr), -0.6, 0.6);
+      }
       const eta = surf[0];
       const depth = eta - (ly - b.r);
       const V = capVolume(depth, b.r);

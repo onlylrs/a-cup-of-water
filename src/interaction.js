@@ -128,7 +128,17 @@ export class Interaction {
       if (t > 0 && r < CUP.rIn && t < best.t) best = { t, kind: 'water', point: p };
       else if (best.kind !== 'ball' && ch.t < best.t) best = { t: ch.t, kind: 'rim', point: ch.point };
     } else if (ch && ch.t < best.t) {
-      best = { t: ch.t, kind: 'glass', point: ch.point, sub: ch.kind };
+      // through the dry upper wall the user is pointing at what is inside: a body or the water
+      const yS = app.surfaceLevel();
+      const dry = ch.kind === 'side' && ch.point.y > yS + 0.002;
+      if (!(dry && best.kind === 'ball')) {
+        best = { t: ch.t, kind: 'glass', point: ch.point, sub: ch.kind };
+        if (dry && ray.direction.y < 0) {
+          const t = (yS - ray.origin.y) / ray.direction.y;
+          const p = ray.origin.clone().addScaledVector(ray.direction, t);
+          if (Math.hypot(p.x - cup.pos.x, p.z - cup.pos.z) < CUP.rIn * 0.97) best = { t, kind: 'water', point: p };
+        }
+      }
     }
     return best;
   }
