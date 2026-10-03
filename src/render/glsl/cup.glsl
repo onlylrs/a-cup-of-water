@@ -191,8 +191,17 @@ vec3 ballColor(int i, vec3 p, vec3 d, float underwater) {
 bool traceBubbles(vec3 o, vec3 d, float tmax, out float tHit, out float tOut, out vec3 nHit) {
   tHit = tmax; tOut = tmax;
   bool hit = false;
-  for (int i = 0; i < MAX_BUBBLES; i++) {
-    if (i >= uBubbleCount) break;
+  if (uBubbleCount == 0) return false;
+  // bubbles are sorted by height with a bucket index in row 2: only test the slab the segment spans
+  const float NB = 32.0, MARGIN = 0.008;
+  float y0 = o.y, y1 = o.y + d.y * min(tmax, 0.3);
+  float ylo = clamp(min(y0, y1) - MARGIN, 0.0, CUP_H), yhi = clamp(max(y0, y1) + MARGIN, 0.0, CUP_H);
+  int k0 = int(min(floor(ylo / CUP_H * NB), NB - 1.0));
+  int k1 = int(min(floor(yhi / CUP_H * NB), NB - 1.0)) + 1;
+  int i0 = int(texelFetch(uBubbles, ivec2(k0, 2), 0).x + 0.5);
+  int i1 = int(texelFetch(uBubbles, ivec2(k1, 2), 0).x + 0.5);
+  for (int i = i0; i < MAX_BUBBLES; i++) {
+    if (i >= i1) break;
     vec4 b = texelFetch(uBubbles, ivec2(i, 0), 0);
     vec3 oc = o - b.xyz;
     float br = b.w * 1.5;
@@ -258,11 +267,13 @@ void iceVolume(vec3 o, vec3 d, float len, inout vec3 col, inout vec3 thr) {
   vec3 sun = uLightColor * 0.55;
   for (int i = 0; i < N; i++) {
     vec3 x = o + d * ((float(i) + jit) * ds);
-    vec4 th = thermalAt(uThermal, length(x.xz), x.y);
-    float fs = th.x;
-    if (fs < 0.03) continue;
     float n1 = texture(uNoise3, x * vec3(38.0, 14.0, 38.0)).r;
     float n2 = texture(uNoise3, x * vec3(150.0, 60.0, 150.0) + 0.37).r;
+    // the enthalpy solver melts cell by cell; a ~1-cell warp hides the (revolved) staircase and
+    // gives the front the pitted look of real melting ice
+    vec2 wf = vec2(length(x.xz), x.y) + (vec2(n2, n1) - 0.5) * vec2(0.0035, 0.006);
+    float fs = thermalAt(uThermal, max(wf.x, 0.0), wf.y).x;
+    if (fs < 0.03) continue;
     // the cloudy core grows as feathery bubble columns, not a smooth iso-surface: warp the lookup
     vec2 wp = vec2(length(x.xz), x.y) + (vec2(n2, n1) - 0.5) * vec2(0.02, 0.024);
     float cloud = thermalAt(uThermal, max(wp.x, 0.0), wp.y).z;
@@ -270,7 +281,9 @@ void iceVolume(vec3 o, vec3 d, float len, inout vec3 col, inout vec3 thr) {
     float streak = smoothstep(0.64, 0.8, texture(uNoise3, vec3(atan(x.z, x.x) * 0.9, x.y * 30.0, length(x.xz) * 8.0)).r);
     // (n1 has its median at 0.5, so the crack sheets sit on a rare level set instead)
     float crack = smoothstep(0.012, 0.0, abs(n1 - 0.78));
-    float dens = fs * (0.8 + 14.0 * cloud * (0.3 + n2) + 40.0 * cloud * cloud * n2 + 38.0 * sqrt(cloud) * streak + crack * 18.0);
+    // clear ice scatters ~0.5 /m; only gas beyond the background uptake makes it milky
+    float cx = max(0.0, cloud - 0.1);
+    float dens = fs * (0.4 + 14.0 * cx * (0.3 + n2) + 40.0 * cx * cx * n2 + 20.0 * sqrt(cloud) * streak + crack * 18.0);
     // the freezing front itself is a slushy, crystalline band
     dens += 30.0 * fs * (1.0 - fs) * (0.4 + n2);
     float a = 1.0 - exp(-dens * ds);

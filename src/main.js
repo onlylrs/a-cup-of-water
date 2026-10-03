@@ -31,6 +31,13 @@ in vec2 vUv;
 out vec4 fragColor;
 void main() { fragColor = vec4(texture(uSrc, vUv).rgb, 1.0); }
 `;
+const PREMUL_FRAG = /* glsl */`
+precision highp float;
+uniform sampler2D uSrc;
+in vec2 vUv;
+out vec4 fragColor;
+void main() { fragColor = texture(uSrc, vUv); }
+`;
 
 const _m4 = new THREE.Matrix4();
 const _q = new THREE.Quaternion();
@@ -127,8 +134,15 @@ class App {
     this.overlay = new THREE.Scene();
     this.frost = createFrostShell(this.shared);
     this.overlay.add(this.frost);
+    // vapour is soft and expensive to march: it is rendered at half resolution and blended on
     this.steam = new Steam(this.shared, this.noise3);
-    this.overlay.add(this.steam.mesh);
+    this.steamScene = new THREE.Scene();
+    this.steamScene.add(this.steam.mesh);
+    this.steamComposite = new FullscreenPass(shaderMaterial({
+      fragmentShader: PREMUL_FRAG, uniforms: { uSrc: { value: null } },
+      transparent: true, blending: THREE.CustomBlending,
+      blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor,
+    }));
     this.frostEnabled = true;
 
     // top-down view of the table around the glass (fallback for refracted rays that land off-screen)
@@ -199,6 +213,7 @@ class App {
       bg: makeTarget(W, H, { type: THREE.HalfFloatType, depth: true, samples: 4, mipmaps: true }),
       main: makeTarget(W, H, { type: THREE.HalfFloatType, depth: true, samples: 4, mipmaps: true }),
       final: makeTarget(W, H, { type: THREE.HalfFloatType }),
+      steam: makeTarget(Math.ceil(W / 2), Math.ceil(H / 2), { type: THREE.HalfFloatType }),
     };
     this.rw = W; this.rh = H;
     this.post.resize(W, H);
@@ -491,6 +506,14 @@ class App {
     this.frost.visible = this.frostEnabled;
     r.setRenderTarget(this.targets.final);
     r.render(this.overlay, cam);
+    if (this.steam.mesh.visible) {
+      r.setRenderTarget(this.targets.steam);
+      r.setClearColor(0x000000, 0);
+      r.clear(true, false, false);
+      r.render(this.steamScene, cam);
+      this.steamComposite.material.uniforms.uSrc.value = this.targets.steam.texture;
+      this.steamComposite.render(r, this.targets.final);
+    }
 
     // ---- pass 4: post
     const dbg = [null, this.waves.surfaceTexture, this.thermal.texture, this.condensation.texture, this.caustics.target.texture, this.topTarget.texture][this.debugMode] || null;

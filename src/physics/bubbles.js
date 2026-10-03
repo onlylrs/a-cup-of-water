@@ -34,8 +34,11 @@ export class Bubbles {
       const y = CUP.base + 0.002 + Math.pow(rng(), 1.6) * 0.035;
       this.sites.push({ kind: 1, x: Math.cos(a) * (CUP.rIn - 0.0004), z: Math.sin(a) * (CUP.rIn - 0.0004), y, act: 4 + rng() * 9, size: 0.6 + rng() * 0.5, timer: rng(), bubble: null });
     }
-    this.data = new Float32Array(LIMITS.maxBubbles * 2 * 4);
-    this.texture = new THREE.DataTexture(this.data, LIMITS.maxBubbles, 2, THREE.RGBAFormat, THREE.FloatType);
+    // rows 0-1: bubbles sorted by height; row 2: first index of each height bucket, so a ray
+    // segment only tests the bubbles in the slab of heights it crosses
+    this.data = new Float32Array(LIMITS.maxBubbles * 3 * 4);
+    this.texture = new THREE.DataTexture(this.data, LIMITS.maxBubbles, 3, THREE.RGBAFormat, THREE.FloatType);
+    this._order = [];
     this.texture.minFilter = this.texture.magFilter = THREE.NearestFilter;
     this.texture.needsUpdate = true;
     this.count = 0;
@@ -302,16 +305,29 @@ export class Bubbles {
     const n = Math.min(this.list.length, LIMITS.maxBubbles);
     const d = this.data;
     const W = LIMITS.maxBubbles;
+    const order = this._order;
+    order.length = n;
+    for (let i = 0; i < n; i++) order[i] = this.list[i];
+    order.sort((a, b) => a.y - b.y);
     for (let i = 0; i < n; i++) {
-      const b = this.list[i];
+      const b = order[i];
       d[i * 4 + 0] = b.x; d[i * 4 + 1] = b.y; d[i * 4 + 2] = b.z; d[i * 4 + 3] = b.R;
       const o = (W + i) * 4;
       d[o + 0] = b.axis[0]; d[o + 1] = b.axis[1]; d[o + 2] = b.axis[2]; d[o + 3] = b.chi;
+    }
+    const NB = BUBBLE_BUCKETS;
+    let j = 0;
+    for (let k = 0; k <= NB; k++) {
+      const yk = k / NB * CUP.height;
+      while (j < n && order[j].y < yk) j++;
+      d[(2 * W + k) * 4] = k === NB ? n : j;
     }
     this.count = n;
     this.texture.needsUpdate = true;
   }
 }
+
+export const BUBBLE_BUCKETS = 32;
 
 export function mulberry(a) {
   return function () {

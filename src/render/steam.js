@@ -46,11 +46,14 @@ float density(vec3 p) {
   float f = n3(qq * vec3(16.0, 9.0, 16.0) + vec3(0.0, -t * 0.55, 0.0)) * 0.6
           + n3(qq * vec3(38.0, 22.0, 38.0) + vec3(0.0, -t * 1.1, 0.0)) * 0.3
           + n3(qq * vec3(80.0, 50.0, 80.0) + vec3(0.0, -t * 1.9, 0.0)) * 0.1;
-  float rad = R_IN * 0.85 + h * 0.42;
+  float rad = R_IN * 0.8 + h * 0.35;
   float r = length(qq.xz);
   float plume = exp(-pow(r / rad, 2.0) * 2.2);
-  float hfade = smoothstep(-0.002, 0.012, h) * exp(-h / 0.085);
-  float d = smoothstep(0.42, 0.78, f) * plume * hfade * uDensity;
+  // vapour is invisible at the surface; it becomes fog only after mixing with cooler air
+  float hfade = smoothstep(0.006, 0.05, h) * exp(-h / 0.075);
+  // wisps: thin sheets of the turbulent field rather than a uniform cloud
+  float wisp = smoothstep(0.5, 0.86, f) * (0.35 + 0.65 * smoothstep(0.35, 0.65, n3(qq * vec3(9.0, 3.0, 9.0) + vec3(0.0, -t * 0.3, 0.0))));
+  float d = wisp * plume * hfade * uDensity;
   for (int i = 0; i < ${LIMITS.maxPuffs}; i++) {
     if (i >= uPuffCount) break;
     vec4 pf = uPuffs[i];
@@ -71,7 +74,7 @@ void main() {
   float tb = min(min(tmax.x, tmax.y), tmax.z);
   if (rd.y < 0.0) tb = min(tb, (uLevel - 0.003 - ro.y) / rd.y);
   if (tb <= ta) discard;
-  const int STEPS = 44;
+  const int STEPS = 40;
   float dt = (tb - ta) / float(STEPS);
   float jit = hash12(gl_FragCoord.xy + fract(uTime * 7.0) * 61.0);
   float T = 1.0;
@@ -83,10 +86,10 @@ void main() {
     vec3 p = ro + rd * (ta + (float(i) + jit) * dt);
     float dens = density(p);
     if (dens < 0.002) continue;
-    float sig = dens * 220.0;
+    float sig = dens * 32.0;
     float a = 1.0 - exp(-sig * dt);
     // cheap self-shadowing towards the light
-    float sh = exp(-density(p + uLightDir * 0.008) * 1.6);
+    float sh = exp(-density(p + uLightDir * 0.01) * 0.6);
     vec3 Ls = uLightColor * (phase * 7.0 + 0.08) * sh + uAmbient * 1.2;
     L += T * a * Ls;
     T *= 1.0 - a;
