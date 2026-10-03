@@ -74,7 +74,12 @@ void main() {
     add += im.w * exp(-dot(d, d) / (im.z * im.z));
   }
   add *= 1.0 - rigid;
-  fragColor = vec4(hn + add, h + add, 0.0, 1.0);
+  hn += add; h += add;
+  // safety: the linear model is meaningless beyond a few cm; never let a NaN persist
+  hn = clamp(hn, h - 0.004, h + 0.004);
+  hn = clamp(hn, -0.02, 0.02); h = clamp(h, -0.02, 0.02);
+  if (isnan(hn) || isnan(h)) { hn = 0.0; h = 0.0; }
+  fragColor = vec4(hn, h, 0.0, 1.0);
 }
 `;
 

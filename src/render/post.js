@@ -19,8 +19,13 @@ void main() {
   c += texture(uSrc, vUv + vec2(1.0, 1.0) * uTexel).rgb;
   c /= 8.0;
   if (uThreshold > 0.0) {
+    // firefly clamp + soft-knee threshold: only genuinely bright highlights bloom
+    c = min(c, vec3(12.0));
     float l = max(c.r, max(c.g, c.b));
-    c *= smoothstep(uThreshold, uThreshold * 2.5, l);
+    float k = uThreshold * 0.5;
+    float soft = clamp(l - uThreshold + k, 0.0, 2.0 * k);
+    soft = soft * soft / (4.0 * k + 1e-4);
+    c *= max(soft, l - uThreshold) / max(l, 1e-4);
   }
   fragColor = vec4(c, 1.0);
 }
@@ -43,7 +48,7 @@ void main() {
   c += texture(uSrc, vUv + vec2(1.0, -1.0) * uTexel).rgb * 2.0;
   c += texture(uSrc, vUv + vec2(-1.0, 1.0) * uTexel).rgb * 2.0;
   c += texture(uSrc, vUv + vec2(1.0, 1.0) * uTexel).rgb * 2.0;
-  fragColor = vec4(c / 12.0 + texture(uBase, vUv).rgb, 1.0);
+  fragColor = vec4((c / 12.0 + texture(uBase, vUv).rgb) * 0.5, 1.0);
 }
 `;
 
@@ -121,7 +126,7 @@ export class Post {
         uDebugRect: { value: new THREE.Vector4(0.015, 0.03, 0.24, 0.24) }, uRes: { value: new THREE.Vector2() },
       },
     }));
-    this.bloomStrength = 0.22;
+    this.bloomStrength = 0.35;
   }
 
   resize(w, h) {
@@ -143,7 +148,7 @@ export class Post {
       const L = this.levels[i];
       du.uSrc.value = src;
       du.uTexel.value.set(1 / sw, 1 / sh);
-      du.uThreshold.value = i === 0 ? 0.9 : 0;
+      du.uThreshold.value = i === 0 ? 1.4 : 0;
       this.down.render(r, L.down);
       src = L.down.texture; sw = L.w; sh = L.h;
     }

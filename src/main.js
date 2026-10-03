@@ -232,6 +232,12 @@ class App {
     return out;
   }
 
+  // the surface without the ripple field: the reference a body's displacement is measured
+  // against when it radiates waves (measuring against the ripples it creates is a feedback loop)
+  surfaceRefAt(x, z) {
+    return CUP.level + this.levelOffset + this.slosh.height(x, z) + this._bulgeShape(Math.hypot(x, z));
+  }
+
   dropBall(typeIndex, local) {
     const t = BALL_TYPES[typeIndex];
     const a = Math.random() * Math.PI * 2;
@@ -294,6 +300,7 @@ class App {
     const env = {
       cup: this.cup,
       surface: (x, z, out) => this.surfaceAt(x, z, out),
+      surfaceRef: (x, z) => this.surfaceRefAt(x, z),
       sloshVel: (x, z, out) => this.slosh.horizontalVelocity(x, z, out),
       thermal: th,
       T: THREE.MathUtils.clamp(st.meanT, 0, 100),

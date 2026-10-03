@@ -32,8 +32,8 @@ vec3 woodColor(vec2 p, out float rough) {
   float fwR = fwidth(ringCoord);
   float ring = fract(ringCoord);
   float late = smoothstep(0.0, 0.1, ring) * (1.0 - smoothstep(0.2, 0.62, ring));
-  late *= 0.45 + 0.75 * vnoise(vec2(floor(ringCoord) * 1.7, ph * 11.0));
-  late = mix(late, 0.3, smoothstep(0.2, 0.7, fwR));
+  late *= 0.35 + 0.75 * vnoise(vec2(floor(ringCoord) * 1.7, ph * 11.0));
+  late = mix(late, 0.25, smoothstep(0.12, 0.45, fwR));
   // fibres and open pores, also band-limited
   vec2 fq = vec2(q.x * 22.0, q.y * 1500.0);
   float fib = vnoise(fq + w1 * 3.0);
@@ -42,9 +42,9 @@ vec3 woodColor(vec2 p, out float rough) {
   float pores = smoothstep(0.72, 0.95, vnoise(pq));
   pores *= 1.0 - smoothstep(0.3, 1.0, fwidth(pq.y));
   float figure = fbm2(vec2(q.x * 0.9, q.y * 5.0 + ph * 3.0));
-  vec3 early = vec3(0.23, 0.125, 0.062);
-  vec3 lateC = vec3(0.095, 0.048, 0.022);
-  vec3 c = mix(early, lateC, late * 0.7);
+  vec3 early = vec3(0.15, 0.068, 0.03);
+  vec3 lateC = vec3(0.055, 0.024, 0.0105);
+  vec3 c = mix(early, lateC, late * 0.5);
   c *= 0.86 + 0.28 * fib;
   c *= 1.0 - pores * 0.3;
   c *= mix(0.78, 1.12, ph) * (0.9 + 0.2 * figure);
@@ -61,8 +61,10 @@ vec3 woodColor(vec2 p, out float rough) {
 
 export function createTable() {
   const mat = new THREE.MeshPhysicalMaterial({
-    color: 0xffffff, roughness: 0.42, metalness: 0, clearcoat: 0.35, clearcoatRoughness: 0.28,
-    envMapIntensity: 0.4,
+    // oiled (not lacquered) walnut: a soft, low sheen; the light is behind the glass, so a
+    // glossier finish turns the whole table into a grazing-angle mirror of the key softbox
+    color: 0xffffff, roughness: 0.55, metalness: 0, specularIntensity: 0.35,
+    clearcoat: 0.1, clearcoatRoughness: 0.3, envMapIntensity: 0.25,
   });
   mat.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, tableUniforms);

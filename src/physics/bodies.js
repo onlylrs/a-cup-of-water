@@ -75,7 +75,13 @@ export class Bodies {
       for (const b of this.balls) this._integrate(b, h, env, s === 0, dt);
       this._ballContacts();
     }
-    for (const b of this.balls) this._couple(b, dt, env);
+    for (const b of this.balls) {
+      if (!Number.isFinite(b.pos.x + b.pos.y + b.pos.z + b.vel.x + b.vel.y + b.vel.z)) {
+        b.pos.set(env.cup.pos.x, CUP.height + 0.05, env.cup.pos.z);
+        b.vel.set(0, 0, 0); b.vSub = 0; b.locked = false;
+      }
+      this._couple(b, dt, env);
+    }
   }
 
   _integrate(b, dt, env, first, frameDt) {
@@ -128,6 +134,15 @@ export class Bodies {
         const quad = 0.5 * rho * 0.47 * area * speed * iceDrag;
         const lin = 6 * Math.PI * waterViscosity(env.T) * b.r * frac * iceDrag;
         F.x -= (quad + lin) * rx; F.y -= (quad + lin) * ry; F.z -= (quad + lin) * rz;
+        // heave radiation damping of a surface-piercing body (Havelock): the waves it radiates
+        // carry energy away at a damping ratio of ~0.15 of the hydrostatic heave mode
+        if (frac > 0.02 && frac < 0.98) {
+          const wl = Math.min(depth, 2 * b.r - depth);
+          const aw2 = wl * (2 * b.r - wl);
+          const mT = b.mass + 0.5 * rho * V;
+          const om = Math.sqrt(rho * GRAVITY * Math.PI * aw2 / mT);
+          F.y -= 2 * 0.15 * om * mT * ry;
+        }
         // wave-slope (Froude-Krylov) force on floating bodies
         if (frac < 0.98 && this.coupling.waves) {
           F.x -= rho * V * GRAVITY * surf[2] * 0.8;
@@ -280,7 +295,7 @@ export class Bodies {
     const insideCup = r < CUP.rIn && b.pos.y > CUP.base - 0.01;
     let V = 0, depth = 0;
     if (insideCup) {
-      const eta = env.surface(lx, lz, this._s)[0];
+      const eta = env.surfaceRef ? env.surfaceRef(lx, lz) : env.surface(lx, lz, this._s)[0];
       depth = eta - (b.pos.y - b.r);
       V = capVolume(depth, b.r);
     }
