@@ -95,8 +95,8 @@ void main() {
   vec3 nd = normalize(T * nT.x + B * nT.y + N * nT.z);
 
   vec3 col = base.rgb;
-  float haze = clamp(fog * 0.9 + frost * 1.1, 0.0, 1.0) * (1.0 - dc);
-  float lod = haze * 5.0;
+  float haze = clamp(fog * 0.9 + frost * 0.8, 0.0, 1.0) * (1.0 - dc);
+  float lod = haze * 4.2;
   vec3 blurred = blurScene(uv, lod);
   col = mix(col, blurred, smoothstep(0.0, 0.5, haze));
   // fog veil: micro-droplets scatter ambient light back towards the viewer
@@ -105,14 +105,21 @@ void main() {
 
   // frost: dendritic crystal layer with view-dependent glints
   if (frost > 0.01) {
+    // hoar frost is a porous scattering layer: optical depth ~ thickness, never fully opaque at
+    // the ~0.1-0.5 mm a glass collects; growth is patchy and feathery rather than uniform
     float cr = fbm2(s * 1400.0);
+    float patch = fbm2(s * 160.0 + 3.7);
     float fern = smoothstep(0.35, 0.8, fbm2(vec2(s.x * 900.0 + fbm2(s * 300.0) * 4.0, s.y * 2600.0)));
-    float a = clamp(frost * 1.25 - 0.05, 0.0, 1.0);
-    a = a * mix(0.7, 1.0, cr) + fern * 0.25 * smoothstep(0.1, 0.5, frost);
-    a = clamp(a, 0.0, 0.96);
+    float thick = frost * mix(0.45, 1.25, patch) * mix(0.75, 1.15, cr);
+    float grazing = 1.0 - abs(dot(N, V));
+    float a = (1.0 - exp(-thick * (1.6 + 1.4 * grazing))) * 0.86;
+    a += fern * 0.18 * smoothstep(0.1, 0.5, frost);
+    a = clamp(a, 0.0, 0.9);
     vec3 fN = normalize(N + (vec3(hash12(floor(s * 6000.0)), hash12(floor(s * 6000.0) + 3.1), hash12(floor(s * 6000.0) + 5.3)) - 0.5) * 1.6);
     float glint = pow(max(0.0, dot(reflect(-V, fN), uLightDir)), 120.0) * step(0.86, hash12(floor(s * 4200.0)));
-    vec3 frostCol = vec3(0.86, 0.9, 0.95) * (amb * 1.05 + uLightColor * (0.25 + 0.6 * max(0.0, dot(N, uLightDir))) * 0.45);
+    // forward scattering lights the layer from behind as well (the key light is behind the glass)
+    float wrap = 0.35 + 0.4 * max(0.0, dot(N, uLightDir)) + 0.25 * max(0.0, dot(-V, uLightDir));
+    vec3 frostCol = vec3(0.84, 0.88, 0.94) * (amb * 0.9 + uLightColor * wrap * 0.3) * mix(0.8, 1.1, cr);
     frostCol += uLightColor * glint * 6.0;
     col = mix(col, frostCol, a * (1.0 - dc * 0.8));
   }

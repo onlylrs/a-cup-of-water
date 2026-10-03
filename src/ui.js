@@ -248,8 +248,8 @@ export class UI {
     const pct = (b, v) => { b.fill.style.width = `${Math.round(v * 100)}%`; b.val.textContent = `${Math.round(v * 100)}%`; };
     pct(this.barIce, st.iceFraction);
     pct(this.barBoil, st.boiling);
-    pct(this.barGas, Math.min(1, st.gas / 1.6));
-    this.barGas.val.textContent = `${Math.round(st.gas * 100)}%`;
+    pct(this.barGas, Math.min(1, st.gasContent));
+    this.barGas.val.textContent = `${Math.round(Math.min(1, st.gasContent) * 100)}%`;
     this.elTs.textContent = `×${app.thermal.timeScale}`;
     const simMin = app.thermal.simTime / 60;
     this.elStats.innerHTML = [

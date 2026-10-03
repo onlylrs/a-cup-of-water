@@ -263,15 +263,20 @@ void iceVolume(vec3 o, vec3 d, float len, inout vec3 col, inout vec3 thr) {
     if (fs < 0.03) continue;
     float n1 = texture(uNoise3, x * vec3(38.0, 14.0, 38.0)).r;
     float n2 = texture(uNoise3, x * vec3(150.0, 60.0, 150.0) + 0.37).r;
-    float cloud = th.z;
+    // the cloudy core grows as feathery bubble columns, not a smooth iso-surface: warp the lookup
+    vec2 wp = vec2(length(x.xz), x.y) + (vec2(n2, n1) - 0.5) * vec2(0.02, 0.024);
+    float cloud = thermalAt(uThermal, max(wp.x, 0.0), wp.y).z;
     // trapped bubbles: cloudy core plus radial streaks of bubbles, thin crack sheets
-    float streak = smoothstep(0.55, 0.85, texture(uNoise3, vec3(atan(x.z, x.x) * 0.9, x.y * 30.0, length(x.xz) * 8.0)).r);
-    float crack = smoothstep(0.035, 0.0, abs(n1 - 0.5)) * 0.6;
-    float dens = fs * (1.2 + 85.0 * cloud * cloud * (0.35 + n2) + 30.0 * cloud * streak + crack * 25.0);
+    float streak = smoothstep(0.64, 0.8, texture(uNoise3, vec3(atan(x.z, x.x) * 0.9, x.y * 30.0, length(x.xz) * 8.0)).r);
+    // (n1 has its median at 0.5, so the crack sheets sit on a rare level set instead)
+    float crack = smoothstep(0.012, 0.0, abs(n1 - 0.78));
+    float dens = fs * (0.8 + 14.0 * cloud * (0.3 + n2) + 40.0 * cloud * cloud * n2 + 38.0 * sqrt(cloud) * streak + crack * 18.0);
     // the freezing front itself is a slushy, crystalline band
-    dens += 160.0 * fs * (1.0 - fs) * (0.4 + n2);
+    dens += 30.0 * fs * (1.0 - fs) * (0.4 + n2);
     float a = 1.0 - exp(-dens * ds);
-    vec3 Ls = amb * 0.95 + sun * (0.35 + 0.65 * pow(max(0.0, dot(d, uLightDir)), 4.0));
+    // optically thick regions shadow themselves: a back-lit core must not glow like a bulb
+    float sunVis = exp(-dens * 0.006);
+    vec3 Ls = amb * 0.95 + sun * sunVis * (0.35 + 0.65 * pow(max(0.0, dot(d, uLightDir)), 4.0));
     col += thr * Ls * a * vec3(0.93, 0.97, 1.0);
     thr *= 1.0 - a;
   }
@@ -356,8 +361,7 @@ vec3 traceCup(vec3 camLocal, vec3 rd) {
         // frost / fog on the far side of the glass scatters what is seen through it
         float u = atan(p.z, p.x) / TAU;
         vec4 cond = texture(uCond, vec2(u, p.y / CUP_H));
-        float haze = clamp(max(cond.g * 1.1, cond.r * 0.55), 0.0, 0.95);
-        float hz = smoothstep(0.0, 1.0, haze);
+        float hz = max((1.0 - exp(-1.8 * cond.g)) * 0.85, smoothstep(0.0, 1.0, cond.r * 0.55));
         col += deferBackground(p, dOut, thr * (1.0 - hz));
         col += thr * hz * (envDiffuse(dOut) * 0.75 + vec3(0.02));
         break;
@@ -440,7 +444,7 @@ vec3 traceCup(vec3 camLocal, vec3 rd) {
         float ice;
         vec3 ns = surfNormal(p.xz, ice);
         vec3 nn = -ns;
-        if (ice > 0.02) nn = normalize(nn + (texture(uNoise3, p * 120.0).rgb - 0.5) * 0.35 * ice);
+        if (ice > 0.02) nn = normalize(nn - (texture(uNoise3, p * vec3(40.0, 10.0, 40.0)).rgb - 0.5) * 0.14 * ice);
         float n2 = 1.0;
         float nw = mix(uIorWater, 1.309, ice);
         float F = fresnelDielectric(-dot(d, nn), nw, n2);
@@ -501,7 +505,7 @@ vec3 traceCup(vec3 camLocal, vec3 rd) {
       if (ev == 2) {
         float ice;
         vec3 ns = surfNormal(p.xz, ice);
-        if (ice > 0.02) ns = normalize(ns + (texture(uNoise3, p * 120.0).rgb - 0.5) * 0.35 * ice);
+        if (ice > 0.02) ns = normalize(ns + (texture(uNoise3, p * vec3(40.0, 10.0, 40.0)).rgb - 0.5) * 0.14 * ice);
         float nw = mix(uIorWater, 1.309, ice);
         float F = fresnelDielectric(-dot(d, ns), 1.0, nw);
         vec3 rdir = reflect(d, ns);

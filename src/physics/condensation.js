@@ -59,7 +59,7 @@ void main() {
       // vapour deposits as frost; crystals grow preferentially from existing crystals
       float nb = max(max(texture(uPrev, vUv + vec2(texel.x, 0.0)).g, texture(uPrev, vUv - vec2(texel.x, 0.0)).g),
                      max(texture(uPrev, vUv + vec2(0.0, texel.y)).g, texture(uPrev, vUv - vec2(0.0, texel.y)).g));
-      s.g += rate * (0.06 + 2.2 * nb + 3.0 * seed) * 0.6;
+      s.g += rate * (0.004 + 0.06 * nb + 0.14 * seed);
       float fz = min(s.r, uDt * 1.5);
       s.r -= fz; s.g += fz * 0.7;
       // standing droplets freeze in place
@@ -160,6 +160,7 @@ export class Condensation {
     this.rng = mulberry(5);
     this.enabled = true;
     this.speed = 1;
+    this.dewPoint = ROOM.dewPoint;   // of the air around the glass (set by the app)
   }
 
   reset() { this.pass.material.uniforms.uReset.value = 1; this.bands.fill(0); this.fogBands.fill(0); this.drips.length = 0; }
@@ -175,7 +176,7 @@ export class Condensation {
     for (let i = 0; i < nb; i++) {
       const y = (i + 0.5) / nb * CUP.height;
       const Tg = this.thermal.outerGlassTemp(y);
-      const dew = ROOM.dewPoint - Tg;
+      const dew = this.dewPoint - Tg;
       let fog = this.fogBands[i], w = this.bands[i];
       if (dew > 0 && Tg > -0.3) {
         const rate = 0.05 * dew * dt;
@@ -238,6 +239,7 @@ export class Condensation {
     const u = this.pass.material.uniforms;
     u.uPrev.value = this.targets[this.cur].texture;
     u.uDt.value = dtc;
+    u.uDew.value = this.dewPoint;
     u.uLevel.value = levelLocal;
     u.uWaterT.value = waterSurfaceT;
     u.uTime.value += dt;

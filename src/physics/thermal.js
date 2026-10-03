@@ -24,7 +24,7 @@ const BOIL_MIX = 1.5;              // extra agitation while boiling
 const DRHO_REF = 0.08;             // kg/m^3 density inversion that saturates mixing
 const ROHSENOW_K = 45;             // W/(m^2 K^3), nucleate boiling flux ~ K * dT^3
 const EVAP_K = 0.012;              // W/(m^2 Pa) surface evaporation coefficient
-const GAS_THRESHOLD = 1.5;        // supersaturation at which the freezing front nucleates bubbles
+const GAS_THRESHOLD = 2.6;        // supersaturation at which the freezing front nucleates bubbles
 
 export class ThermalSim {
   constructor() {
@@ -370,6 +370,7 @@ export class ThermalSim {
     st.wallBubbles = THREE.MathUtils.clamp((this.gasConc - sol) / 0.45, 0, 1) *
       THREE.MathUtils.smoothstep(maxT, 32, 55) * (1 - st.iceFraction);
     st.gas = this.gasConc;
+    st.gasContent = this.gas / this.waterVolume;   // air still in solution, rel. to saturated water
   }
 
   _upload() {
