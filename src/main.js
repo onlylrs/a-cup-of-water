@@ -334,7 +334,7 @@ class App {
     this.waves.step(dt);
     const sA = this.slosh.A;
     this.waves.compose([sA[0][0] * 1e3, sA[0][1] * 1e3, sA[1][0] * 1e3, sA[1][1] * 1e3], this.levelOffset * 1e3, this.bulge * 1e3);
-    this.waves.readback();
+    this.waves.readback(this.bodies.frame);
 
     // cold air holds little vapour, but vapour from the open water mixes into it and leaves the
     // air near the glass locally supersaturated (mixing fog); its dew/frost point is modelled

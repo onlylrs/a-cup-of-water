@@ -177,6 +177,7 @@ export class Waves {
     this.readBuffer = new Float32Array(this.readN * this.readN * 4);
     this.cpuField = new Float32Array(this.readN * this.readN * 4);
     this.readPending = false;
+    this.fieldTag = -1;
     this.cur = 0;
     this.curSurf = 0;
 
@@ -302,7 +303,9 @@ export class Waves {
   get surfaceTexture() { return this.surface[this.curSurf].texture; }
   get stateTexture() { return this.state[this.cur].texture; }
 
-  readback() {
+  // tag: frame number of the state being read, so consumers can align positions with the
+  // (asynchronously delayed) field in cpuField, see fieldTag
+  readback(tag = 0) {
     if (this.readPending) return;
     const ru = this.readPass.material.uniforms;
     ru.uState.value = this.state[this.cur].texture;
@@ -310,7 +313,7 @@ export class Waves {
     this.readPass.render(this.renderer, this.readTarget);
     this.readPending = true;
     this.renderer.readRenderTargetPixelsAsync(this.readTarget, 0, 0, this.readN, this.readN, this.readBuffer)
-      .then(() => { this.cpuField.set(this.readBuffer); this.readPending = false; })
+      .then(() => { this.cpuField.set(this.readBuffer); this.fieldTag = tag; this.readPending = false; })
       .catch(() => { this.readPending = false; });
   }
 

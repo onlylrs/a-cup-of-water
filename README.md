@@ -253,20 +253,36 @@ $$
 (m + C_a\rho V)\,\dot{\mathbf v} = m\mathbf g + \rho V(-\mathbf g + \mathbf a_f) + C_a \rho V\,\mathbf a_f + \mathbf F_\text{drag} + \mathbf F_\text{contact},
 $$
 
-with V the submerged spherical-cap volume under the local free surface (averaged over a ring at
-the waterline), added-mass coefficient $C_a = 1/2$, quadratic drag ($C_d = 0.47$), and the
-fluid acceleration $\mathbf a_f$ of the accelerating cup — so in a dragged glass light objects lean
-*into* the acceleration and heavy ones fall behind. Floating bodies feel the slope of the wave
-field, and their heave is damped by the waves they radiate (Havelock radiation damping), which
-in turn are written into the height field. Densities from 650 to 7850 kg/m³ give floating,
-neutrally buoyant and sinking behaviour; the thermo bead (975 kg/m³) floats in cold water and
-sinks once hot water has expanded below its density (≈ 73 °C). Glass, table, rim and
-sphere–sphere contacts use impulses with restitution and Coulomb friction.
+with V the submerged spherical-cap volume under the local free surface, added-mass coefficient
+$C_a = 1/2$, Schiller–Naumann drag $C_d = \frac{24}{Re}(1 + 0.15\,Re^{0.687})$ (Stokes drag when
+creeping, $C_d \approx 1$ for a slowly drifting ball), and the fluid acceleration $\mathbf a_f$ of
+the accelerating cup — so in a dragged glass light objects lean *into* the acceleration and heavy
+ones fall behind. Densities from 650 to 7850 kg/m³ give floating, neutrally buoyant and sinking
+behaviour; the thermo bead (975 kg/m³) floats in cold water and sinks once hot water has expanded
+below its density (≈ 73 °C). Glass, table, rim and sphere–sphere contacts use impulses with
+restitution and Coulomb friction.
+
+*Body–wave coupling.* Floating bodies feel the height and slope of the wave field
+(Froude–Krylov), and their heave is damped by the waves they radiate (Havelock radiation
+damping); their change of displaced volume is written into the height field, fully during the
+plunge on entry and afterwards only the radiating fraction (the rest of the near field moves with
+the body as added mass). Because radiation is already represented by added mass and damping,
+a body must react to the *incident* surface only: feeling its own waves cancels the hydrostatic
+stiffness and makes bodies bob and drift by themselves. The ripples are therefore measured on a
+ring of 1.38 footprint radii, where the body's injected near field
+$-A e^{-s^2} + \tfrac{A}{4}e^{-s^2/4}$ vanishes, centred where the body was when the
+(asynchronously read back) field was computed. Finally, *contact-angle hysteresis* pins the
+waterline: dragging it across the surface costs a Coulomb-like force
+$\sigma\cdot 2\pi a\,(\cos\theta_r - \cos\theta_a)$, which brings floating objects to rest in calm
+water while any real wave slope, slosh or boiling still moves them.
 
 The ice from the thermal solver is an obstacle: the advancing front pushes buoyant bodies, while
 sunken bodies (far above the critical particle size for front pushing) are engulfed where they
 lie; once surrounded, a body is locked into the ice and released again when its surroundings
-melt. Fast entries produce a crown splash and a delayed Worthington jet (`physics/splash.js`).
+melt. A frozen lid is a rigid floor — objects dropped onto it rest on the ice (with low friction
+and restitution, rolling down the expansion dome) rather than floating in it — while objects
+that were already floating when the lid formed are frozen into it. Fast entries produce a crown
+splash and a delayed Worthington jet (`physics/splash.js`).
 
 ### Bubbles (`physics/bubbles.js`)
 
@@ -341,8 +357,10 @@ plano-convex lenses with an inverted, magnified view, dark rims and specular hig
 
 **Steam** (`render/steam.js`). A half-resolution ray-marched buoyant plume of domain-warped,
 upward-advected turbulence whose density follows the evaporation and boiling rate. It is
-invisible right at the surface, where the vapour has not yet mixed with cooler air, forms thin wisps, self-shadows,
-gets puffs from bursting bubbles and lags behind a moving glass.
+invisible right at the surface, where the vapour has not yet mixed with cooler air, forms thin
+wisps, self-shadows, gets puffs from bursting bubbles and lags behind a moving glass. Below the
+rim it is confined by the glass wall; above it the plume leaves the rim and widens as it entrains
+air.
 
 **Scene and post.** A procedural photo studio (softbox aligned with the key light so
 reflections, shadows and caustics agree, two strip boxes for the long highlights on the cylinder,
@@ -403,6 +421,10 @@ removes their cost.
 * H. D. Mendelson, *The prediction of bubble terminal velocities from wave theory*, AIChE J. 13 (1967).
 * D. W. Moore, *The velocity of rise of distorted gas bubbles in a liquid of small viscosity*,
   J. Fluid Mech. 23 (1965).
+* L. Schiller & A. Naumann, *Über die grundlegenden Berechnungen bei der Schwerkraftaufbereitung*,
+  Z. Ver. Dtsch. Ing. 77 (1933) — sphere drag correlation.
+* P.-G. de Gennes, F. Brochard-Wyart & D. Quéré, *Capillarity and Wetting Phenomena*, Springer
+  (2004) — contact-angle hysteresis.
 * M. R. Maxey & J. J. Riley, *Equation of motion for a small rigid sphere in a nonuniform flow*,
   Phys. Fluids 26 (1983).
 * H. N. Abramson (ed.), *The Dynamic Behavior of Liquids in Moving Containers*, NASA SP-106 (1966);

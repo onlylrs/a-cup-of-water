@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { CUP, LIMITS, GRAVITY } from '../config.js';
-import { waterDensity, waterViscosity } from './water.js';
+import { waterDensity, waterViscosity, surfaceTension } from './water.js';
 import { BALL_TYPES } from './materials.js';
 
 // Rigid spheres interacting with the water, the glass, the ice and each other.
@@ -11,10 +11,16 @@ import { BALL_TYPES } from './materials.js';
 // lean *into* an acceleration and heavy ones fall behind, as they do in a real glass.
 
 const TABLE_HALF = 0.42;
+const PIN_HYSTERESIS = 0.06;   // cos(receding) - cos(advancing) contact angle on the balls
+const ICE_FRICTION = 0.05;
+const ICE_RESTITUTION = 0.3;   // impacts crush the ice surface
+const HIST = 16;
+const ENTRY_TIME = 0.5;        // s after entering the water during which the plunge radiates fully
+const HEAVE_RADIATION = 0.1;   // fraction of the heave displacement that radiates as free waves
 const _v = new THREE.Vector3();
 const _q = new THREE.Quaternion();
-const RING_C = [0, 1, 2, 3, 4, 5].map((k) => Math.cos(k * Math.PI / 3));
-const RING_S = [0, 1, 2, 3, 4, 5].map((k) => Math.sin(k * Math.PI / 3));
+const RING8_C = [0, 1, 2, 3, 4, 5, 6, 7].map((k) => Math.cos(k * Math.PI / 4));
+const RING8_S = [0, 1, 2, 3, 4, 5, 6, 7].map((k) => Math.sin(k * Math.PI / 4));
 const AXES = [[1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1], [0, -1, 0], [0, 1, 0],
   [0.707, -0.707, 0], [-0.707, -0.707, 0], [0, -0.707, 0.707], [0, -0.707, -0.707]];
 
@@ -47,6 +53,10 @@ export class Ball {
     this.id = Ball.nextId++;
     this.jetTimer = -1;
     this.entrySpeed = 0;
+    this.hist = new Float64Array(HIST * 2);   // cup-local (x, z) at the end of recent frames
+    this.born = -1;
+    this.rf = this.r;                         // radius of the footprint it radiates waves with
+    this.wetTime = 0;
   }
 }
 Ball.nextId = 1;
@@ -59,6 +69,8 @@ export class Bodies {
     this._f = [0, 0];
     this._s = [0, 0];
     this._s2 = [0, 0, 0, 0];
+    this._s3 = [0, 0, 0, 0];
+    this.frame = 0;
   }
 
   add(typeIndex, pos) {
@@ -72,6 +84,8 @@ export class Bodies {
 
   // env: { cup, surface(x,z,out) -> [etaAbs, w, sx, sz], sloshVel(x,z,out), thermal, T, waves, splash, boil }
   step(dt, env) {
+    this.frame++;
+    for (const b of this.balls) if (b.born < 0) b.born = this.frame;
     const n = this.substeps;
     const h = dt / n;
     for (let s = 0; s < n; s++) {
@@ -109,19 +123,40 @@ export class Bodies {
     const insideCup = rLocal < CUP.rIn && ly - b.r < CUP.level + 0.03 && ly > CUP.base - 0.01;
     if (insideCup) {
       const surf = env.surface(lx, lz, this._s);
-      // pressure acts over the whole wetted surface, so ripples shorter than the body average
-      // out: use the mean height and least-squares slope over a ring at the waterline
+      // Hydrostatic and Froude-Krylov forces act against the *incident* surface; the body's own
+      // radiated waves are already represented by its added mass and radiation damping, and
+      // feeling them again cancels the hydrostatic stiffness (the displacement it injects is a
+      // depression right under it) and makes the body bob and drift by itself. Its injected
+      // near field (-A e^{-s^2} + A/4 e^{-s^2/4}, s = d / rf) vanishes at s ~ 1.38, so the
+      // ripples are measured on that ring. Pressure acts over the whole wetted surface anyway,
+      // so ripples much shorter than the body average out.
       {
-        const rr = b.r * 0.75;
-        let se = surf[0], sx = 0, sz = 0;
-        for (let k = 0; k < 6; k++) {
-          const c = RING_C[k], s = RING_S[k];
-          const e = env.surface(lx + c * rr, lz + s * rr, this._s2)[0];
-          se += e; sx += e * c; sz += e * s;
+        const W = env.waves;
+        const ripV0 = W.sample(lx, lz, this._s2)[1];
+        // the CPU copy of the ripples lags a few frames: centre the ring where the body was
+        // when that field was computed (and where its latest waves were injected)
+        let hx = lx, hz = lz;
+        const lag = this.frame - W.fieldTag;
+        if (lag >= 1 && lag < HIST && W.fieldTag >= b.born) {
+          const k0 = (W.fieldTag % HIST) * 2;
+          hx = b.hist[k0]; hz = b.hist[k0 + 1];
         }
-        surf[0] = se / 7;
-        surf[2] = THREE.MathUtils.clamp(sx / (3 * rr), -0.6, 0.6);
-        surf[3] = THREE.MathUtils.clamp(sz / (3 * rr), -0.6, 0.6);
+        const rr = 1.38 * b.rf;
+        let hm = 0, vm = 0, sx = 0, sz = 0;
+        for (let k = 0; k < 8; k++) {
+          const c = RING8_C[k], s = RING8_S[k];
+          const w = W.sample(hx + c * rr, hz + s * rr, this._s2);
+          hm += w[0]; vm += w[1]; sx += w[0] * c; sz += w[0] * s;
+        }
+        hm /= 8; vm /= 8; sx /= 4 * rr; sz /= 4 * rr;
+        // slosh modes and the ice dome are analytic and carry no self-interaction
+        const e = 0.0015;
+        const gx = (env.surfaceRef(lx + e, lz) - env.surfaceRef(lx - e, lz)) / (2 * e);
+        const gz = (env.surfaceRef(lx, lz + e) - env.surfaceRef(lx, lz - e)) / (2 * e);
+        surf[0] = env.surfaceRef(lx, lz) + hm;
+        surf[1] = surf[1] - ripV0 + vm;
+        surf[2] = THREE.MathUtils.clamp(gx + sx, -0.6, 0.6);
+        surf[3] = THREE.MathUtils.clamp(gz + sz, -0.6, 0.6);
       }
       const eta = surf[0];
       const depth = eta - (ly - b.r);
@@ -148,9 +183,13 @@ export class Bodies {
         const speed = Math.hypot(rx, ry, rz);
         const area = Math.PI * b.r * b.r * Math.min(1, frac * 1.3 + 0.05);
         const iceDrag = 1 + 40 * iceHere * iceHere;
-        const quad = 0.5 * rho * 0.47 * area * speed * iceDrag;
-        const lin = 6 * Math.PI * waterViscosity(env.T) * b.r * frac * iceDrag;
-        F.x -= (quad + lin) * rx; F.y -= (quad + lin) * ry; F.z -= (quad + lin) * rz;
+        // Schiller-Naumann drag, C_d = 24/Re (1 + 0.15 Re^0.687): Stokes drag when creeping,
+        // C_d ~ 1 at the Re ~ 10-100 of a slowly drifting ball, 0.44 above Re ~ 1000
+        const mu = waterViscosity(env.T);
+        const Re = Math.max(1e-3, rho * speed * 2 * b.r / mu);
+        const Cd = Re < 1000 ? 24 / Re * (1 + 0.15 * Math.pow(Re, 0.687)) : 0.44;
+        const kd = 0.5 * rho * Cd * area * speed * iceDrag;
+        F.x -= kd * rx; F.y -= kd * ry; F.z -= kd * rz;
         // heave radiation damping of a surface-piercing body (Havelock): the waves it radiates
         // carry energy away at a damping ratio of ~0.15 of the hydrostatic heave mode
         if (frac > 0.02 && frac < 0.98) {
@@ -159,6 +198,13 @@ export class Bodies {
           const mT = b.mass + 0.5 * rho * V;
           const om = Math.sqrt(rho * GRAVITY * Math.PI * aw2 / mT);
           F.y -= 2 * 0.15 * om * mT * ry;
+          // contact-angle hysteresis pins the waterline: dragging it across the surface costs
+          // ~ sigma * perimeter * (cos th_r - cos th_a), a Coulomb-like resistance that brings a
+          // floating body to rest in calm water while any real wave slope still moves it
+          const Fpin = surfaceTension(env.T) * 2 * Math.PI * Math.sqrt(aw2) * PIN_HYSTERESIS;
+          const vh = Math.hypot(rx, rz);
+          const kp = Fpin / Math.max(vh, 0.004);
+          F.x -= kp * rx; F.z -= kp * rz;
         }
         // wave-slope (Froude-Krylov) force on floating bodies
         if (frac < 0.98 && this.coupling.waves) {
@@ -199,20 +245,20 @@ export class Bodies {
     const r = Math.hypot(lx, lz);
     const rimR = 0.5 * (CUP.rIn + CUP.rOut), tube = 0.5 * (CUP.rOut - CUP.rIn) + 0.0006;
 
-    const collide = (nx, ny, nz, pen, wallVel) => {
+    const collide = (nx, ny, nz, pen, wallVel, friction = b.type.friction, rest = e) => {
       // positional projection + restitution on the relative normal velocity
       b.pos.x += nx * pen; b.pos.y += ny * pen; b.pos.z += nz * pen;
       const wvx = wallVel ? wallVel.x : 0, wvz = wallVel ? wallVel.z : 0;
       const rvx = b.vel.x - wvx, rvy = b.vel.y, rvz = b.vel.z - wvz;
       const vn = rvx * nx + rvy * ny + rvz * nz;
       if (vn < 0) {
-        const j = -(1 + (Math.abs(vn) > 0.08 ? e : 0)) * vn;
+        const j = -(1 + (Math.abs(vn) > 0.08 ? rest : 0)) * vn;
         b.vel.x += j * nx; b.vel.y += j * ny; b.vel.z += j * nz;
         // Coulomb friction drives rolling
         const tx = rvx - vn * nx, ty = rvy - vn * ny, tz = rvz - vn * nz;
         const tl = Math.hypot(tx, ty, tz);
         if (tl > 1e-6) {
-          const mu = b.type.friction;
+          const mu = friction;
           const dv = Math.min(tl, mu * j) * 0.6;
           b.vel.x -= tx / tl * dv; b.vel.y -= ty / tl * dv; b.vel.z -= tz / tl * dv;
           // spin: omega = n x v / r for rolling without slipping
@@ -239,8 +285,8 @@ export class Bodies {
     // rim torus
     {
       const lx2 = b.pos.x - cup.pos.x, lz2 = b.pos.z - cup.pos.z;
-      const r2 = Math.max(1e-6, Math.hypot(lx2, lz2));
-      const cx = lx2 / r2 * rimR, cz = lz2 / r2 * rimR;
+      const r2 = Math.hypot(lx2, lz2);
+      const cx = r2 > 1e-6 ? lx2 / r2 * rimR : rimR, cz = r2 > 1e-6 ? lz2 / r2 * rimR : 0;
       const dx = lx2 - cx, dy = b.pos.y - CUP.height, dz = lz2 - cz;
       const d = Math.hypot(dx, dy, dz);
       if (d < b.r + tube && d > 1e-6) collide(dx / d, dy / d, dz / d, b.r + tube - d, cup.vel);
@@ -251,8 +297,26 @@ export class Bodies {
     b.pos.x = THREE.MathUtils.clamp(b.pos.x, -TABLE_HALF, TABLE_HALF);
     b.pos.z = THREE.MathUtils.clamp(b.pos.z, -TABLE_HALF, TABLE_HALF);
 
+    // a frozen lid is a rigid floor: a body arriving from above rests and rolls on it (the
+    // free surface, frozen ripples and the expansion dome included) instead of floating in it;
+    // a body that was already floating when the lid formed is frozen in below
+    let onIce = false;
+    if (this.coupling.ice && r < CUP.rIn && b.submergedFrac < 0.2 && env.thermal.stats.topIce > 0.02 &&
+        env.thermal.solidAt(r, CUP.level - 0.0012) > 0.8) {
+      const s = this._s3, e = 0.002;
+      const eta = env.surface(lx, lz, s)[0];
+      if (b.pos.y > eta - 0.3 * b.r) {
+        const gx = (env.surface(lx + e, lz, s)[0] - env.surface(lx - e, lz, s)[0]) / (2 * e);
+        const gz = (env.surface(lx, lz + e, s)[0] - env.surface(lx, lz - e, s)[0]) / (2 * e);
+        const inv = 1 / Math.hypot(gx, 1, gz);
+        const pen = (eta + b.r - b.pos.y) * inv;
+        onIce = pen > -0.0005;
+        if (pen > 0) collide(-gx * inv, inv, -gz * inv, pen, cup.vel, ICE_FRICTION, Math.min(e, ICE_RESTITUTION));
+      }
+    }
+
     // ice: solid regions of the thermal field act as obstacles and finally trap the body
-    if (this.coupling.ice && r < CUP.rIn && b.pos.y < CUP.level + 0.006 && env.thermal.stats.iceFraction > 0.001) {
+    if (!onIce && this.coupling.ice && r < CUP.rIn && b.pos.y < CUP.level + 0.006 && env.thermal.stats.iceFraction > 0.001) {
       let iceDirs = 0, nx = 0, ny = 0, nz = 0;
       const lx3 = b.pos.x - cup.pos.x, lz3 = b.pos.z - cup.pos.z;
       for (const a of AXES) {
@@ -322,12 +386,18 @@ export class Bodies {
     }
     const dV = V - b.vSub;
     const partial = depth > 0 && depth < 2 * b.r;
+    b.wetTime = V > 0 ? b.wetTime + dt : 0;
     if (insideCup && this.coupling.waves && !b.locked) {
       const a = Math.sqrt(Math.max(0, Math.min(depth, 2 * b.r - depth) * (2 * b.r - Math.min(depth, 2 * b.r - depth))));
       const rf = Math.max(0.0022, (partial ? a : b.r * 0.6) * 1.05);
+      b.rf = rf;
       const weight = partial ? 1 : Math.exp(-Math.max(0, depth - 2 * b.r) / 0.006) * 0.6;
+      // the plunge on entry opens a crater of the full displaced volume; afterwards most of a
+      // heaving body's near field moves with it (its added mass) and only the part that
+      // carries the radiation damping leaves as free waves
+      const radiated = b.wetTime < ENTRY_TIME ? 1 : HEAVE_RADIATION;
       if (Math.abs(dV) > 1e-10 && weight > 0.01) {
-        const amp = dV / (Math.PI * rf * rf) * weight;
+        const amp = dV / (Math.PI * rf * rf) * weight * radiated;
         env.waves.addImpulse(lx, lz, rf, -amp);
         env.waves.addImpulse(lx, lz, 2 * rf, amp / 4);
       }
@@ -361,6 +431,8 @@ export class Bodies {
       }
     }
     b.vSub = V;
+    const k0 = (this.frame % HIST) * 2;
+    b.hist[k0] = lx; b.hist[k0 + 1] = lz;
   }
 
   // melt-release check, called once per frame

@@ -61,6 +61,11 @@ float density(vec3 p) {
     float pr = 0.006 + (1.0 - min(1.0, pf.w)) * 0.012;
     d += pf.w * exp(-dot(dp, dp) / (pr * pr)) * smoothstep(0.35, 0.7, f) * 1.4;
   }
+  // below the rim the vapour is confined by the glass; above it the plume leaves the rim and
+  // spreads as it entrains air
+  float above = max(0.0, p.y - CUP_H);
+  float wallR = R_IN - 0.001 + above * 0.6;
+  d *= 1.0 - smoothstep(wallR - 0.006 - above * 0.3, wallR, length(p.xz - uCupPos.xz));
   return d;
 }
 
