@@ -73,12 +73,20 @@ export class Slosh {
       // soft saturation keeps the crest inside the glass (a crude stand-in for wave breaking)
       const mag = Math.hypot(this.A[n][0], this.A[n][1]);
       const lim = amax / (n + 1);
+      const V = this.V[n];
       if (mag > lim * 0.7) {
         const target = lim * Math.tanh(mag / lim);
         const s = target / mag;
         this.A[n][0] *= s; this.A[n][1] *= s;
+        // a breaking crest cannot keep rising: drop the part of its velocity that would
         this.V[n][0] *= 0.97; this.V[n][1] *= 0.97;
+        const vr = (this.A[n][0] * V[0] + this.A[n][1] * V[1]) / target;
+        if (vr > 0) { V[0] -= vr * this.A[n][0] / target; V[1] -= vr * this.A[n][1] / target; }
       }
+      // nor can the flow outrun an oscillation of the largest crest the glass holds; without this
+      // a violent jerk (several g) pumps the modal velocity to m/s while the amplitude is capped
+      const vmag = Math.hypot(V[0], V[1]), vmax = w * lim;
+      if (vmag > vmax) { V[0] *= vmax / vmag; V[1] *= vmax / vmag; }
     }
   }
 

@@ -243,7 +243,11 @@ $$
 whose static solution is the projection of the tilted surface $\eta = -(a/g)x$ onto the Bessel
 basis. $\omega_n$ comes from the dispersion relation with $k = \xi_n/R$ (the first mode is
 ≈ 3.6 Hz for this glass); damping uses the viscous boundary-layer estimate of Case & Parkinson /
-Miles plus contact-line damping, and grows to a full lock as an ice lid forms.
+Miles plus contact-line damping, and grows to a full lock as an ice lid forms. The linear theory
+has no spilling, so a crest that approaches the rim saturates softly (a stand-in for breaking):
+it stops rising, and no mode moves faster than an oscillation of that largest crest,
+$|\dot A| \le \omega A_\text{max}$. Without the velocity bound a violent jerk of several g keeps
+pumping the modal flow to metres per second while the height is capped.
 
 ### Floating and sinking objects (`physics/bodies.js`)
 
@@ -260,7 +264,11 @@ the accelerating cup — so in a dragged glass light objects lean *into* the acc
 ones fall behind. Densities from 650 to 7850 kg/m³ give floating, neutrally buoyant and sinking
 behaviour; the thermo bead (975 kg/m³) floats in cold water and sinks once hot water has expanded
 below its density (≈ 73 °C). Glass, table, rim and sphere–sphere contacts use impulses with
-restitution and Coulomb friction.
+restitution and Coulomb friction. The glass is swept across the body sub-steps rather than
+jumping to its end-of-frame position (dragged fast it covers several centimetres per frame), and
+each body remembers which side of the wall it is on, a side that can only change over the rim.
+So a fast drag cannot tunnel a ball through the 2.5 mm wall. Since the water never spills, a free
+ball that a surge carries up to the rim is held in as well; only lifting it clear takes it out.
 
 *Body–wave coupling.* Floating bodies feel the height and slope of the wave field
 (Froude–Krylov), and their heave is damped by the waves they radiate (Havelock radiation

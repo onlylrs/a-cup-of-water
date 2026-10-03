@@ -57,6 +57,7 @@ export class Ball {
     this.born = -1;
     this.rf = this.r;                         // radius of the footprint it radiates waves with
     this.wetTime = 0;
+    this.side = 0;                            // +1 inside the glass wall, -1 outside, 0 unknown
   }
 }
 Ball.nextId = 1;
@@ -71,6 +72,9 @@ export class Bodies {
     this._s2 = [0, 0, 0, 0];
     this._s3 = [0, 0, 0, 0];
     this.frame = 0;
+    this._cupPrev = null;
+    this._subCup = { pos: new THREE.Vector3(), vel: null, acc: null };
+    this._envS = {};
   }
 
   add(typeIndex, pos) {
@@ -88,10 +92,18 @@ export class Bodies {
     for (const b of this.balls) if (b.born < 0) b.born = this.frame;
     const n = this.substeps;
     const h = dt / n;
+    // the glass moved over the whole frame already; sweep it across the substeps so a fast drag
+    // (1-2 m/s, several cm per frame) does not teleport the wall past the bodies
+    const cup = env.cup, sub = this._subCup;
+    if (!this._cupPrev) this._cupPrev = cup.pos.clone();
+    sub.vel = cup.vel; sub.acc = cup.acc;
+    const envS = Object.assign(this._envS, env, { cup: sub });
     for (let s = 0; s < n; s++) {
-      for (const b of this.balls) this._integrate(b, h, env, s === 0, dt);
+      sub.pos.lerpVectors(this._cupPrev, cup.pos, (s + 1) / n);
+      for (const b of this.balls) this._integrate(b, h, envS, s === 0, dt);
       this._ballContacts();
     }
+    this._cupPrev.copy(cup.pos);
     for (const b of this.balls) {
       if (!Number.isFinite(b.pos.x + b.pos.y + b.pos.z + b.vel.x + b.vel.y + b.vel.z)) {
         b.pos.set(env.cup.pos.x, CUP.height + 0.05, env.cup.pos.z);
@@ -269,21 +281,29 @@ export class Bodies {
       }
     };
 
+    // a body can only change sides of the wall over the rim, so even a violent jerk of the glass
+    // cannot make it tunnel through the 2.5 mm wall (out onto the table, or into the glass)
+    const rimTop = CUP.height + tube;
+    if (b.side === 0 || b.pos.y - b.r > rimTop) b.side = r < rimR ? 1 : -1;
+    // the water never spills, so neither may a free body it carries: a surge that lifts one to the
+    // rim must not let the lip catapult it out; only lifting it clear (by hand) takes it over
+    const contained = b.side > 0 && !b.grabbed && b.pos.y - b.r < rimTop;
     const below = b.pos.y < CUP.height + b.r;
-    if (below && r < rimR) {
+    if (contained || (below && b.side > 0)) {
       // inside the glass
-      if (r + b.r > CUP.rIn && b.pos.y < CUP.height) {
+      if (r + b.r > CUP.rIn && (contained || b.pos.y < CUP.height)) {
         const nx = -lx / r, nz = -lz / r;
         collide(nx, 0, nz, r + b.r - CUP.rIn, cup.vel);
       }
       if (b.pos.y - b.r < CUP.base) collide(0, 1, 0, CUP.base - (b.pos.y - b.r), cup.vel);
     } else if (below) {
       if (r - b.r < CUP.rOut && b.pos.y < CUP.height) {
-        collide(lx / r, 0, lz / r, CUP.rOut + b.r - r, cup.vel);
+        const nx = r > 1e-6 ? lx / r : 1, nz = r > 1e-6 ? lz / r : 0;
+        collide(nx, 0, nz, CUP.rOut + b.r - r, cup.vel);
       }
     }
     // rim torus
-    {
+    if (!contained) {
       const lx2 = b.pos.x - cup.pos.x, lz2 = b.pos.z - cup.pos.z;
       const r2 = Math.hypot(lx2, lz2);
       const cx = r2 > 1e-6 ? lx2 / r2 * rimR : rimR, cz = r2 > 1e-6 ? lz2 / r2 * rimR : 0;
