@@ -267,7 +267,11 @@ export class Bodies {
         b.lockLocal.set(lx3, b.pos.y, lz3);
         b.vel.set(0, 0, 0);
         this.onLock?.(b);
-      } else if (iceDirs > 0) {
+      } else if (iceDirs > 0 && b.type.density < 1000) {
+        // only buoyant bodies are shoved by the front; a sunken, cm-sized body is far above the
+        // critical particle size for front pushing and is engulfed where it lies; a floating body
+        // is held against the descending lid by buoyancy and gets frozen into it
+        ny = Math.max(ny, 0);
         const l = Math.hypot(nx, ny, nz);
         if (l > 1e-6) collide(nx / l, ny / l, nz / l, 0.0004, cup.vel);
       }

@@ -336,8 +336,10 @@ class App {
     this.waves.compose([sA[0][0] * 1e3, sA[0][1] * 1e3, sA[1][0] * 1e3, sA[1][1] * 1e3], this.levelOffset * 1e3, this.bulge * 1e3);
     this.waves.readback();
 
-    // freezer air is dry: its frost point sits a few kelvin above the cabinet temperature, so a
-    // glass frosts lightly inside and heavily once it meets humid room air again
+    // cold air holds little vapour, but vapour from the open water mixes into it and leaves the
+    // air near the glass locally supersaturated (mixing fog); its dew/frost point is modelled
+    // as cabinet + 9 K, capped by the room's. A glass frosts lightly in the cold and heavily
+    // once it meets humid room air again.
     const Tair = this.thermal.envTemp;
     this.condensation.dewPoint = Tair < ROOM.temperature ? Math.min(ROOM.dewPoint, Tair + 9) : ROOM.dewPoint;
     this.condensation.update(dt, CUP.level + this.levelOffset, topT);
