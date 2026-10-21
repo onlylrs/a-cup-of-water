@@ -14,6 +14,7 @@ export const GLSL_HEADER = /* glsl */`
 #define TH_TOPY ${f((THERMAL.topRow + 0.5) * THERMAL.dz)}
 #define MAX_BUBBLES ${LIMITS.maxBubbles}
 #define MAX_BALLS ${LIMITS.maxBalls}
+#define STEAM_MAX_PUFFS ${LIMITS.maxPuffs}
 #define WAVE_N ${f(GRID.waveN)}
 #ifndef PI
 #define PI 3.141592653589793

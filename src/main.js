@@ -122,6 +122,13 @@ class App {
     this.caustics.material.uniforms.uBallCount = cu.uBallCount;
     tableUniforms.uCaustics.value = this.caustics.target.texture;
     this.steam = new Steam(this.shared, this.noise3);
+    // Share steam state: interior scattering follows the traced air segments,
+    // while the exterior plume uses its own depth-clipped pass.
+    for (const name of ['uSteamDensity','uSteamLevel','uSteamLean','uSteamAmbient','uSteamPuffs','uSteamPuffCount']) {
+      cu[name] = this.steam.material.uniforms[name];
+    }
+    this.steam.material.uniforms.uBallPos = cu.uBallPos;
+    this.steam.material.uniforms.uBallCount = cu.uBallCount;
     this.steamScene = new THREE.Scene();
     this.steamScene.add(this.steam.mesh);
     this.steamComposite = new FullscreenPass(shaderMaterial({
@@ -196,6 +203,9 @@ class App {
       final: makeTarget(W, H, { type: THREE.HalfFloatType }),
       steam: makeTarget(Math.ceil(W/2), Math.ceil(H/2), { type: THREE.HalfFloatType }),
     };
+    this.targets.bg.depthTexture = new THREE.DepthTexture(W,H,THREE.UnsignedIntType);
+    this.steam.material.uniforms.uSceneDepth.value = this.targets.bg.depthTexture;
+    this.steam.material.uniforms.uViewport.value.set(this.targets.steam.width,this.targets.steam.height);
     this.rw = W; this.rh = H;
     this.post.resize(W, H);
     const buf = this.renderer.getDrawingBufferSize(new THREE.Vector2());
@@ -455,10 +465,11 @@ class App {
     r.clear(true, true, false);
     r.render(this.scene, cam);
 
-    // Heating build: composite steam over the traced liquid scene.
+    // Composite only above-rim steam; interior vapour is already traced through glass.
     this.copyPass.material.uniforms.uSrc.value = this.targets.main.texture;
     this.copyPass.render(r, this.targets.final);
     if (this.steam.mesh.visible) {
+      this.steam.material.uniforms.uInvViewProj.value.copy(cam.projectionMatrix).multiply(cam.matrixWorldInverse).invert();
       r.setRenderTarget(this.targets.steam); r.setClearColor(0x000000,0); r.clear(true,false,false);
       r.render(this.steamScene,cam);
       this.steamComposite.material.uniforms.uSrc.value=this.targets.steam.texture;

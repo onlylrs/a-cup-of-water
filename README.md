@@ -52,6 +52,15 @@ still cast ordinary shadows. Internal bodies instead occlude each refracted
 light segment in the caustics pass. The glass's own shadow and light focusing
 are preserved. This is a direct-light approximation, not full global illumination.
 
+## Steam visibility
+
+Steam below the rim is integrated along the cup tracer's air segments. It uses
+refracted view directions, glass transmission, and the next water/body/wall hit
+as the segment boundary. Steam above the rim uses the same density model in a
+separate pass, clipped to scene depth and traced sphere silhouettes. Interior
+vapour is not added again over the finished glass image. This is a reduced
+single-scattering approximation, not multiple-scattering volume transport.
+
 ## Controls
 
 - 1–4: maple, plastic, ceramic, steel.

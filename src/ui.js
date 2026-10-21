@@ -47,13 +47,12 @@ export class UI {
     const app = this.app;
     this.root.append(h('div', { class: 'title' }, h('h1', {}, 'A Cup of Water'),
       h('p', {}, 'Liquid + boiling demo · COMP5411 · Group 8')));
-    // Always visible provenance survives H / ?ui=0, so clean captures retain context.
-    this.root.append(h('div', { class: 'stage-label' }, 'Scoped liquid + heating build · derived from the full implementation'));
+    this.root.append(h('div', { class: 'stage-label' }, 'Liquid interaction · heating · boiling'));
     const panel = h('div', { class: 'panel' });
     this.root.append(panel);
-    panel.append(section('Demonstration scope',
+    panel.append(section('Simulation overview',
       h('p', { class: 'scope-copy' }, 'Liquid interaction, heating and boiling'),
-      h('p', { class: 'note' }, 'Freezing, frost and condensation are outside this build.')));
+      h('p', { class: 'note' }, 'Drag, drop objects and change the heating stage.')));
     this.waterReadout = h('strong', { class: 'water-readout' }, 'Water 22.0 °C');
     this.sourceReadout = h('span', { class: 'note' }, 'Stage 22 °C');
     this.sourceButtons = [22,85,230].map((T,i)=>h('button',{onclick:()=>this.setSource(T)},['Room','Warm','Boil'][i]));

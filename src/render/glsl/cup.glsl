@@ -295,6 +295,8 @@ void iceVolume(vec3 o, vec3 d, float len, inout vec3 col, inout vec3 thr) {
   }
 }
 
+// STEAM_VOLUME_SHARED
+
 // ---------- the integrator ----------
 vec3 traceCup(vec3 camLocal, vec3 rd) {
   vec3 col = vec3(0.0);
@@ -509,7 +511,9 @@ vec3 traceCup(vec3 camLocal, vec3 rd) {
       int ev = tWall < tTopC ? 0 : 1;
       if (tS > 0.0 && tS < tEnd) { tEnd = tS; ev = 2; }
       float tb; int bi;
-      if (traceBalls(p, d, tEnd, tb, bi)) {
+      bool hitBody = traceBalls(p, d, tEnd, tb, bi);
+      steamInterior(p + uCupPos, d, hitBody ? tb : tEnd, col, thr);
+      if (hitBody) {
         col += thr * ballColor(bi, p + d * tb, d, 0.0);
         thr = vec3(0.0);
         break;

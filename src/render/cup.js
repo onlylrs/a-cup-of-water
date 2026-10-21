@@ -4,6 +4,7 @@ import { GLSL_HEADER } from './glsl/header.js';
 import COMMON from './glsl/common.glsl?raw';
 import SHADING from './glsl/shading.glsl?raw';
 import CUP_GLSL from './glsl/cup.glsl?raw';
+import STEAM_GLSL from './glsl/steam.glsl?raw';
 
 // The glass is drawn as its bounding cylinder; the fragment shader ray-traces everything
 // inside it (see glsl/cup.glsl). It writes alpha = 1 so the frost pass can tell which
@@ -27,7 +28,7 @@ uniform float uEnvMaxLod;
 uniform vec3 uLightDir, uLightColor;
 in vec3 vWorld;
 out vec4 fragColor;
-` + COMMON + SHADING + CUP_GLSL + /* glsl */`
+` + COMMON + SHADING + CUP_GLSL.replace('// STEAM_VOLUME_SHARED', STEAM_GLSL) + /* glsl */`
 void main() {
   vec3 rd = normalize(vWorld - cameraPosition);
   vec3 col = traceCup(cameraPosition - uCupPos, rd);

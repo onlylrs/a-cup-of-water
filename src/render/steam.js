@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { CUP, LIMITS } from '../config.js';
 import { GLSL_HEADER } from './glsl/header.js';
 import COMMON from './glsl/common.glsl?raw';
+import STEAM_GLSL from './glsl/steam.glsl?raw';
 
 // Visible vapour above hot water: a ray-marched, buoyant, turbulent plume whose density
 // follows the evaporation rate from the thermal solver, plus short-lived puffs released by
@@ -22,52 +23,18 @@ precision highp sampler3D;
 uniform sampler3D uNoise3;
 uniform vec3 uCupPos;
 uniform vec3 uBoxMin, uBoxMax;
-uniform float uDensity, uTime, uLevel;
-uniform vec2 uLean;
+uniform float uTime;
 uniform vec3 uLightDir, uLightColor;
-uniform vec3 uAmbient;
-uniform vec4 uPuffs[${LIMITS.maxPuffs}];
-uniform int uPuffCount;
+uniform sampler2D uSceneDepth;
+uniform mat4 uInvViewProj;
+uniform vec2 uViewport;
+uniform vec4 uBallPos[MAX_BALLS];
+uniform int uBallCount;
 in vec3 vWorld;
 out vec4 fragColor;
 ${COMMON}
 
-float n3(vec3 p) { return texture(uNoise3, p).r; }
-
-float density(vec3 p) {
-  vec3 q = p - vec3(uCupPos.x, uLevel, uCupPos.z);
-  float h = q.y;
-  if (h < -0.002) return 0.0;
-  q.xz -= uLean * h * 4.0;
-  float t = uTime;
-  // domain-warped turbulence advected upward
-  vec3 w = vec3(n3(q * 7.0 + vec3(0.0, -t * 0.22, 0.0)), n3(q * 7.0 + vec3(5.2, -t * 0.22, 1.3)), n3(q * 7.0 + vec3(2.1, -t * 0.22, 7.7))) - 0.5;
-  vec3 qq = q + w * (0.015 + h * 0.18);
-  float f = n3(qq * vec3(16.0, 9.0, 16.0) + vec3(0.0, -t * 0.55, 0.0)) * 0.6
-          + n3(qq * vec3(38.0, 22.0, 38.0) + vec3(0.0, -t * 1.1, 0.0)) * 0.3
-          + n3(qq * vec3(80.0, 50.0, 80.0) + vec3(0.0, -t * 1.9, 0.0)) * 0.1;
-  float rad = R_IN * 0.8 + h * 0.35;
-  float r = length(qq.xz);
-  float plume = exp(-pow(r / rad, 2.0) * 2.2);
-  // vapour is invisible at the surface; it becomes fog only after mixing with cooler air
-  float hfade = smoothstep(0.006, 0.05, h) * exp(-h / 0.075);
-  // wisps: thin sheets of the turbulent field rather than a uniform cloud
-  float wisp = smoothstep(0.5, 0.86, f) * (0.35 + 0.65 * smoothstep(0.35, 0.65, n3(qq * vec3(9.0, 3.0, 9.0) + vec3(0.0, -t * 0.3, 0.0))));
-  float d = wisp * plume * hfade * uDensity;
-  for (int i = 0; i < ${LIMITS.maxPuffs}; i++) {
-    if (i >= uPuffCount) break;
-    vec4 pf = uPuffs[i];
-    vec3 dp = p - pf.xyz;
-    float pr = 0.006 + (1.0 - min(1.0, pf.w)) * 0.012;
-    d += pf.w * exp(-dot(dp, dp) / (pr * pr)) * smoothstep(0.35, 0.7, f) * 1.4;
-  }
-  // below the rim the vapour is confined by the glass; above it the plume leaves the rim and
-  // spreads as it entrains air
-  float above = max(0.0, p.y - CUP_H);
-  float wallR = R_IN - 0.001 + above * 0.6;
-  d *= 1.0 - smoothstep(wallR - 0.006 - above * 0.3, wallR, length(p.xz - uCupPos.xz));
-  return d;
-}
+${STEAM_GLSL}
 
 void main() {
   vec3 ro = cameraPosition;
@@ -77,25 +44,43 @@ void main() {
   vec3 tmin = min(t0, t1), tmax = max(t0, t1);
   float ta = max(max(tmin.x, tmin.y), max(tmin.z, 0.0));
   float tb = min(min(tmax.x, tmax.y), tmax.z);
-  if (rd.y < 0.0) tb = min(tb, (uLevel - 0.003 - ro.y) / rd.y);
+  if (rd.y < 0.0) tb = min(tb, (uSteamLevel - 0.003 - ro.y) / rd.y);
+  // Stop the exterior volume at opaque raster geometry (table/external bodies).
+  vec2 uv = gl_FragCoord.xy / uViewport;
+  float z = texture(uSceneDepth, uv).r;
+  if (z < 1.0) {
+    vec4 h = uInvViewProj * vec4(uv * 2.0 - 1.0, z * 2.0 - 1.0, 1.0);
+    tb = min(tb, dot(h.xyz / h.w - ro, rd));
+  }
+  // Bodies traced by the cup shader have no raster depth, including portions
+  // protruding above the rim. Clip against those analytic spheres as well.
+  for (int i=0; i<MAX_BALLS; i++) {
+    if (i >= uBallCount) break;
+    vec4 b = uBallPos[i];
+    vec3 oc = ro - (b.xyz + uCupPos);
+    float qb = dot(oc,rd), qc = dot(oc,oc) - b.w*b.w;
+    float disc = qb*qb - qc;
+    if (disc >= 0.0) {
+      float t = -qb - sqrt(disc);
+      if (t > 0.0) tb = min(tb,t);
+    }
+  }
   if (tb <= ta) discard;
   const int STEPS = 40;
   float dt = (tb - ta) / float(STEPS);
   float jit = hash12(gl_FragCoord.xy + fract(uTime * 7.0) * 61.0);
   float T = 1.0;
   vec3 L = vec3(0.0);
-  float cosT = dot(rd, uLightDir);
-  float g = 0.55;
-  float phase = (1.0 - g * g) / pow(1.0 + g * g - 2.0 * g * cosT, 1.5) / (4.0 * PI);
   for (int i = 0; i < STEPS; i++) {
     vec3 p = ro + rd * (ta + (float(i) + jit) * dt);
-    float dens = density(p);
+    // Below-rim steam is integrated along the cup's refracted ray, never
+    // composited over the already shaded glass, rim or liquid surface.
+    if (p.y < CUP_H) continue;
+    float dens = steamDensity(p);
     if (dens < 0.002) continue;
     float sig = dens * 32.0;
     float a = 1.0 - exp(-sig * dt);
-    // cheap self-shadowing towards the light
-    float sh = exp(-density(p + uLightDir * 0.01) * 0.6);
-    vec3 Ls = uLightColor * (phase * 7.0 + 0.08) * sh + uAmbient * 1.2;
+    vec3 Ls = steamLighting(p, rd);
     L += T * a * Ls;
     T *= 1.0 - a;
     if (T < 0.02) break;
@@ -117,12 +102,15 @@ export class Steam {
       uniforms: {
         uLightDir: shared.uLightDir, uLightColor: shared.uLightColor,
         uNoise3: { value: noise },
+        uSceneDepth: { value: null }, uInvViewProj: { value: new THREE.Matrix4() },
+        uViewport: { value: new THREE.Vector2(1,1) },
+        uBallPos: { value: [] }, uBallCount: { value: 0 },
         uCupPos: { value: new THREE.Vector3() },
         uBoxMin: { value: new THREE.Vector3() }, uBoxMax: { value: new THREE.Vector3() },
-        uDensity: { value: 0 }, uTime: { value: 0 }, uLevel: { value: CUP.level },
-        uLean: { value: new THREE.Vector2() },
-        uAmbient: { value: new THREE.Vector3(0.05, 0.052, 0.058) },
-        uPuffs: { value: puffU }, uPuffCount: { value: 0 },
+        uSteamDensity: { value: 0 }, uTime: { value: 0 }, uSteamLevel: { value: CUP.level },
+        uSteamLean: { value: new THREE.Vector2() },
+        uSteamAmbient: { value: new THREE.Vector3(0.05, 0.052, 0.058) },
+        uSteamPuffs: { value: puffU }, uSteamPuffCount: { value: 0 },
       },
       transparent: true,
       depthTest: false,
@@ -157,8 +145,8 @@ export class Steam {
     // the plume lags behind a moving glass
     this.lean.x += (-cupVel.x * 0.35 - this.lean.x) * Math.min(1, dt * 2.5);
     this.lean.y += (-cupVel.z * 0.35 - this.lean.y) * Math.min(1, dt * 2.5);
-    u.uLean.value.copy(this.lean);
-    u.uDensity.value = this.enabled ? density : 0;
+    u.uSteamLean.value.copy(this.lean);
+    u.uSteamDensity.value = this.enabled ? density : 0;
     for (let i = this.puffs.length - 1; i >= 0; i--) {
       const p = this.puffs[i];
       p.age += dt;
@@ -169,9 +157,9 @@ export class Steam {
     const n = Math.min(this.puffs.length, LIMITS.maxPuffs);
     for (let i = 0; i < n; i++) {
       const p = this.puffs[i];
-      u.uPuffs.value[i].set(p.x, p.y, p.z, p.s * Math.max(0, 1 - p.age / 1.6));
+      u.uSteamPuffs.value[i].set(p.x, p.y, p.z, p.s * Math.max(0, 1 - p.age / 1.6));
     }
-    u.uPuffCount.value = this.enabled ? n : 0;
+    u.uSteamPuffCount.value = this.enabled ? n : 0;
     this.mesh.visible = this.enabled && (density > 0.003 || n > 0);
   }
 }
