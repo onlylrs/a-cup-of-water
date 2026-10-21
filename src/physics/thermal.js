@@ -26,7 +26,12 @@ const ROHSENOW_K = 45;             // W/(m^2 K^3), nucleate boiling flux ~ K * d
 const EVAP_K = 0.012;              // W/(m^2 Pa) surface evaporation coefficient
 const GAS_THRESHOLD = 2.6;        // supersaturation at which the freezing front nucleates bubbles
 
-export class ThermalSim {
+export class HeatingSim {
+  // Heating-only demonstration. The upstream phase-change solver is retained for
+  // shared data compatibility, but cold stages and frozen initial states are unavailable.
+  set envTemp(v) { this._envTemp = Math.max(ROOM.temperature, Math.min(250, Number.isFinite(v) ? v : ROOM.temperature)); }
+  get envTemp() { return this._envTemp; }
+
   constructor() {
     const { nr, nz, dr, dz } = THERMAL;
     this.nr = nr; this.nz = nz;
@@ -86,7 +91,9 @@ export class ThermalSim {
     this._computeStableDt();
   }
 
-  reset(T0 = 20) {
+  reset(T0 = ROOM.temperature) {
+    T0 = Math.max(ROOM.temperature, Math.min(99, Number.isFinite(T0) ? T0 : ROOM.temperature));
+    this.simTime = 0;
     const n = this.nr * this.nz;
     for (let c = 0; c < n; c++) {
       if (this.type[c] === WATER) this.h[c] = this._hFromT(T0);

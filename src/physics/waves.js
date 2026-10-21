@@ -217,6 +217,11 @@ export class Waves {
   }
 
   clear() {
+    this.resetGeneration = (this.resetGeneration ?? 0) + 1;
+    this.impulses = [];
+    this.carry = 0;
+    this.simTime = 0;
+    this.fieldTag = -1;
     const r = this.renderer;
     const old = r.getClearColor(new THREE.Color());
     const oldA = r.getClearAlpha();
@@ -307,13 +312,21 @@ export class Waves {
   // (asynchronously delayed) field in cpuField, see fieldTag
   readback(tag = 0) {
     if (this.readPending) return;
+    const generation = this.resetGeneration;
     const ru = this.readPass.material.uniforms;
     ru.uState.value = this.state[this.cur].texture;
     ru.uDt.value = this.params.dtSub;
     this.readPass.render(this.renderer, this.readTarget);
     this.readPending = true;
     this.renderer.readRenderTargetPixelsAsync(this.readTarget, 0, 0, this.readN, this.readN, this.readBuffer)
-      .then(() => { this.cpuField.set(this.readBuffer); this.fieldTag = tag; this.readPending = false; })
+      .then(() => {
+        // A reset may happen while the GPU readback is in flight.
+        if (generation === this.resetGeneration) {
+          this.cpuField.set(this.readBuffer);
+          this.fieldTag = tag;
+        }
+        this.readPending = false;
+      })
       .catch(() => { this.readPending = false; });
   }
 

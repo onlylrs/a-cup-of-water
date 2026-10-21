@@ -2,23 +2,20 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import './style.css';
 import { CUP, LIGHT, LIMITS, ROOM } from './config.js';
-import { ThermalSim } from './physics/thermal.js';
+import { HeatingSim } from './physics/thermal.js';
+import { Bubbles } from './physics/bubbles.js';
+import { Caustics } from './render/caustics.js';
+import { Steam } from './render/steam.js';
 import { Slosh } from './physics/slosh.js';
 import { Waves } from './physics/waves.js';
 import { Bodies } from './physics/bodies.js';
-import { Bubbles } from './physics/bubbles.js';
-import { Splash } from './physics/splash.js';
-import { Condensation } from './physics/condensation.js';
 import { waterIor } from './physics/water.js';
 import { BALL_TYPES } from './physics/materials.js';
 import { createEnvironment } from './render/environment.js';
 import { createTable, createBackdrop, tableUniforms } from './render/table.js';
 import { createCupMaterial, createCupProxy } from './render/cup.js';
 import { createNoise3D } from './render/noise3d.js';
-import { Caustics } from './render/caustics.js';
-import { createFrostShell } from './render/frost.js';
-import { Steam } from './render/steam.js';
-import { createBallMeshFactory, createSplashMesh } from './render/objects.js';
+import { createBallMeshFactory } from './render/objects.js';
 import { Post } from './render/post.js';
 import { FullscreenPass, shaderMaterial, makeTarget } from './render/fsquad.js';
 import { CupController, Interaction } from './interaction.js';
@@ -31,14 +28,6 @@ in vec2 vUv;
 out vec4 fragColor;
 void main() { fragColor = vec4(texture(uSrc, vUv).rgb, 1.0); }
 `;
-const PREMUL_FRAG = /* glsl */`
-precision highp float;
-uniform sampler2D uSrc;
-in vec2 vUv;
-out vec4 fragColor;
-void main() { fragColor = texture(uSrc, vUv); }
-`;
-
 const _m4 = new THREE.Matrix4();
 const _q = new THREE.Quaternion();
 const _tmp4 = [0, 0, 0, 0];
@@ -60,13 +49,15 @@ class App {
     this.quality = 0.8;
 
     // ---------------- simulation
-    this.thermal = new ThermalSim();
+    this.thermal = new HeatingSim();
     this.slosh = new Slosh();
     this.waves = new Waves(renderer, this.thermal.texture);
     this.bodies = new Bodies();
     this.bubbles = new Bubbles();
-    this.splash = new Splash();
-    this.condensation = new Condensation(renderer, this.thermal);
+    this.emptyTexture = new THREE.DataTexture(new Uint8Array(4), 1, 1, THREE.RGBAFormat);
+    this.emptyTexture.needsUpdate = true;
+    this.bodies.coupling.ice = false;
+    this.bodies.coupling.bubbles = true;
     this.cup = new CupController();
     this.levelOffset = 0;
     this.bulge = 0;
@@ -118,6 +109,7 @@ class App {
     const cu = this.cupMaterial.uniforms;
     cu.uThermal.value = this.thermal.texture;
     cu.uBubbles.value = this.bubbles.texture;
+    cu.uCond.value = this.emptyTexture;
     cu.uNoise3.value = this.noise3;
     this.cupMesh = createCupProxy(this.cupMaterial);
     this.cupMesh.renderOrder = 2;
@@ -125,25 +117,21 @@ class App {
 
     this.makeBallMesh = createBallMeshFactory(this.shared);
     this.ballMeshes = new Map();
-    this.splashMesh = createSplashMesh(this.shared);
-    scene.add(this.splashMesh);
-
-    this.caustics = new Caustics(renderer, { surface: this.waves.surfaceTexture, thermal: this.thermal.texture, cond: this.condensation.texture });
+    this.caustics = new Caustics(renderer, { surface: this.waves.surfaceTexture, thermal: this.thermal.texture, cond: this.emptyTexture });
+    this.caustics.material.uniforms.uBallPos = cu.uBallPos;
+    this.caustics.material.uniforms.uBallCount = cu.uBallCount;
     tableUniforms.uCaustics.value = this.caustics.target.texture;
-
-    this.overlay = new THREE.Scene();
-    this.frost = createFrostShell(this.shared);
-    this.overlay.add(this.frost);
-    // vapour is soft and expensive to march: it is rendered at half resolution and blended on
     this.steam = new Steam(this.shared, this.noise3);
     this.steamScene = new THREE.Scene();
     this.steamScene.add(this.steam.mesh);
     this.steamComposite = new FullscreenPass(shaderMaterial({
-      fragmentShader: PREMUL_FRAG, uniforms: { uSrc: { value: null } },
-      transparent: true, blending: THREE.CustomBlending,
+      fragmentShader: 'precision highp float; uniform sampler2D uSrc; in vec2 vUv; out vec4 fragColor; void main(){ fragColor=texture(uSrc,vUv); }',
+      uniforms: { uSrc: { value: null } }, transparent: true, blending: THREE.CustomBlending,
       blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor,
     }));
-    this.frostEnabled = true;
+    this.bubbles.onBurst = b => {
+      if (!b.gas && this.topT > 90 && b.R > 0.0008) this.steam.addPuff(this.cup.pos.x+b.x, this.surfaceAt(b.x,b.z,_tmp4)[0]+.004, this.cup.pos.z+b.z, Math.min(1,b.R/.002)*.6);
+    };
 
     // top-down view of the table around the glass (fallback for refracted rays that land off-screen)
     this.topSize = 0.42;
@@ -173,14 +161,6 @@ class App {
 
     this.follow = true;
     this.interaction = new Interaction({ canvas, camera: this.camera, controls: this.controls, app: this });
-
-    // ---------------- events coupling subsystems
-    this.bubbles.onBurst = (b) => {
-      const s = this.surfaceAt(b.x, b.z, _tmp4)[0];
-      const xw = this.cup.pos.x + b.x, zw = this.cup.pos.z + b.z;
-      this.splash.burstDrops(xw, s, zw, b.R);
-      if (!b.gas && this.topT > 90 && b.R > 0.0008) this.steam.addPuff(xw, s + 0.004, zw, Math.min(1, b.R / 0.002) * 0.6);
-    };
 
     // ---------------- render targets
     this.targets = null;
@@ -214,16 +194,19 @@ class App {
       bg: makeTarget(W, H, { type: THREE.HalfFloatType, depth: true, samples: 4, mipmaps: true }),
       main: makeTarget(W, H, { type: THREE.HalfFloatType, depth: true, samples: 4, mipmaps: true }),
       final: makeTarget(W, H, { type: THREE.HalfFloatType }),
-      steam: makeTarget(Math.ceil(W / 2), Math.ceil(H / 2), { type: THREE.HalfFloatType }),
+      steam: makeTarget(Math.ceil(W/2), Math.ceil(H/2), { type: THREE.HalfFloatType }),
     };
     this.rw = W; this.rh = H;
     this.post.resize(W, H);
     const buf = this.renderer.getDrawingBufferSize(new THREE.Vector2());
     this.post.final.material.uniforms.uRes.value.copy(buf);
-    this.frost.material.uniforms.uRes.value.set(W, H);
   }
 
-  setQuality(q) { this.quality = q; this.resize(); }
+  setQuality(q) {
+    this.quality = [1, 0.8, 0.6, 0.45].includes(q) ? q : 0.8;
+    if (this.ui?.qualitySelect) this.ui.qualitySelect.value = String(this.quality);
+    this.resize();
+  }
 
   surfaceLevel() { return CUP.level + this.levelOffset; }
 
@@ -255,11 +238,12 @@ class App {
   }
 
   dropBall(typeIndex, local) {
+    if (![0, 1, 3, 4].includes(typeIndex)) return null;
     const t = BALL_TYPES[typeIndex];
     const a = Math.random() * Math.PI * 2;
     const rr = Math.sqrt(Math.random()) * (CUP.rIn - t.radius - 0.004);
     const lx = local ? local.x : Math.cos(a) * rr, lz = local ? local.z : Math.sin(a) * rr;
-    const pos = new THREE.Vector3(this.cup.pos.x + lx, CUP.height + 0.05 + Math.random() * 0.03, this.cup.pos.z + lz);
+    const pos = new THREE.Vector3(this.cup.pos.x + lx, (local ? CUP.height + 0.065 : CUP.height + 0.05 + Math.random() * 0.03), this.cup.pos.z + lz);
     const b = this.bodies.add(typeIndex, pos);
     b.vel.copy(this.cup.vel);
     return b;
@@ -267,12 +251,12 @@ class App {
 
   clearBalls() { this.bodies.clear(); }
 
-  resetWater(T = ROOM.temperature) {
-    this.thermal.reset(T);
-    this.waves.clear();
+  resetWater() {
+    this.thermal.reset();
     this.bubbles.clear();
-    this.condensation.reset();
-    this.splash.drops.length = 0;
+    this.bubbles.count = 0;
+    this.steam.puffs.length = 0;
+    this.waves.clear();
     for (const b of this.bodies.balls) b.locked = false;
     this.slosh.A.forEach((a) => { a[0] = a[1] = 0; });
     this.slosh.V.forEach((a) => { a[0] = a[1] = 0; });
@@ -321,32 +305,21 @@ class App {
       thermal: th,
       T: THREE.MathUtils.clamp(st.meanT, 0, 100),
       waves: this.waves,
-      splash: this.splash,
       balls: this.bodies.balls,
       ice: (r) => (this.bodies.coupling.ice ? this.iceAt(r) : 0),
     };
     this.bodies.step(dt, env);
     this.bodies.updateLocks(env);
     this.bubbles.step(dt, env);
-    this.splash.step(dt, env);
     this.interaction.update(dt);
 
     this.waves.step(dt);
     const sA = this.slosh.A;
     this.waves.compose([sA[0][0] * 1e3, sA[0][1] * 1e3, sA[1][0] * 1e3, sA[1][1] * 1e3], this.levelOffset * 1e3, this.bulge * 1e3);
     this.waves.readback(this.bodies.frame);
+    const steamD = THREE.MathUtils.smoothstep(topT,55,99)*.55 + st.boiling*.9;
+    this.steam.update(dt,this.time,this.cup.pos,this.cup.vel,steamD);
 
-    // cold air holds little vapour, but vapour from the open water mixes into it and leaves the
-    // air near the glass locally supersaturated (mixing fog); its dew/frost point is modelled
-    // as cabinet + 9 K, capped by the room's. A glass frosts lightly in the cold and heavily
-    // once it meets humid room air again.
-    const Tair = this.thermal.envTemp;
-    this.condensation.dewPoint = Tair < ROOM.temperature ? Math.min(ROOM.dewPoint, Tair + 9) : ROOM.dewPoint;
-    this.condensation.update(dt, CUP.level + this.levelOffset, topT);
-
-    // visible vapour: grows with the surface temperature, strongly with boiling
-    const steamD = THREE.MathUtils.smoothstep(topT, 55, 99) * 0.55 + st.boiling * 0.9;
-    this.steam.update(dt, this.time, this.cup.pos, this.cup.vel, steamD * (1 - st.topIce));
   }
 
   _rippleBound() {
@@ -371,6 +344,9 @@ class App {
       _q.copy(b.quat).invert();
       m.material.uniforms.uRot.value.setFromMatrix4(_m4.makeRotationFromQuaternion(_q));
       m.userData.inCup = inCup.has(b);
+      // Internal spheres occlude refracted light in the caustics pass. Their
+      // raster proxies must not cast a second, unrefracted opaque table shadow.
+      m.castShadow = !m.userData.inCup;
     }
     for (const [id, m] of this.ballMeshes) {
       if (!alive.has(id)) { this.scene.remove(m); m.material.dispose(); this.ballMeshes.delete(id); }
@@ -383,7 +359,6 @@ class App {
     const cupPos = this.cup.pos;
     const st = this.thermal.stats;
     this.cupMesh.position.copy(cupPos);
-    this.frost.position.copy(cupPos);
 
     // camera follows the glass
     if (this.follow) {
@@ -413,20 +388,6 @@ class App {
     cu.uBallCount.value = n;
     this._syncBallMeshes(inCup);
 
-    // splash droplets
-    const sm = this.splashMesh;
-    const drops = this.splash.drops;
-    sm.count = Math.min(drops.length, LIMITS.maxSplash);
-    for (let i = 0; i < sm.count; i++) {
-      const dp = drops[i];
-      const sp = dp.v.length();
-      const stretch = 1 + Math.min(2.5, sp * 0.8);
-      _q.setFromUnitVectors(new THREE.Vector3(0, 1, 0), sp > 1e-4 ? dp.v.clone().divideScalar(sp) : new THREE.Vector3(0, 1, 0));
-      _m4.compose(dp.p, _q, new THREE.Vector3(dp.r, dp.r * stretch, dp.r));
-      sm.setMatrixAt(i, _m4);
-    }
-    sm.instanceMatrix.needsUpdate = true;
-
     // ---- uniforms
     const ripple = this._rippleBound();
     const sl = this.slosh.energy() * 1.6;
@@ -440,7 +401,7 @@ class App {
     cu.uCupPos.value.copy(cupPos);
     cu.uSurface.value = this.waves.surfaceTexture;
     cu.uBubbleCount.value = this.bubbles.count;
-    cu.uCond.value = this.condensation.texture;
+    cu.uCond.value = this.emptyTexture;
     cu.uEtaMin.value = etaMin; cu.uEtaMax.value = etaMax;
     cu.uIorWater.value = ior;
     cu.uTime.value = this.time;
@@ -450,11 +411,9 @@ class App {
     cu.uTopT.value = this.topT;
 
     tableUniforms.uCupPos.value.copy(cupPos);
-    this.caustics.update(cupPos, this.lightDir, {
-      ior, etaMin, etaMax, ice, surface: this.waves.surfaceTexture, cond: this.condensation.texture,
-    });
+    this.caustics.update(cupPos,this.lightDir,{ior,etaMin,etaMax,ice:0,surface:this.waves.surfaceTexture,cond:this.emptyTexture});
     tableUniforms.uCausticRect.value.copy(this.caustics.rect);
-    tableUniforms.uLightPlane.value.set(cupPos.x, cupPos.z, this.caustics.extent, this.caustics.enabled ? 1 : 0);
+    tableUniforms.uLightPlane.value.set(cupPos.x,cupPos.z,this.caustics.extent,this.caustics.enabled?1:0);
     tableUniforms.uLightU.value.copy(this.caustics.lightU);
     tableUniforms.uLightV.value.copy(this.caustics.lightV);
     tableUniforms.uLightOrigin.value.copy(this.caustics.lightOrigin);
@@ -466,7 +425,6 @@ class App {
     // ---- pass 1: background (what the glass refracts) — no glass, no droplets, no traced bodies
     r.shadowMap.needsUpdate = true;
     this.cupMesh.visible = false;
-    sm.visible = false;
     for (const m of this.ballMeshes.values()) {
       if (m.userData.inCup) { m.material.colorWrite = false; m.material.depthWrite = false; }
     }
@@ -489,7 +447,6 @@ class App {
     const s = this.topSize;
     cu.uTableRect.value.set(cupPos.x - s / 2, cupPos.z + s / 2, s, -s);
     this.cupMesh.visible = true;
-    sm.visible = true;
 
     // ---- pass 2: full scene with the ray-traced glass
     cu.uBg.value = this.targets.bg.texture;
@@ -498,28 +455,18 @@ class App {
     r.clear(true, true, false);
     r.render(this.scene, cam);
 
-    // ---- pass 3: moisture on the glass and vapour
+    // Heating build: composite steam over the traced liquid scene.
     this.copyPass.material.uniforms.uSrc.value = this.targets.main.texture;
     this.copyPass.render(r, this.targets.final);
-    const fu = this.frost.material.uniforms;
-    fu.uScene.value = this.targets.main.texture;
-    fu.uCond.value = this.condensation.texture;
-    fu.uCupPos.value.copy(cupPos);
-    fu.uTime.value = this.time;
-    this.frost.visible = this.frostEnabled;
-    r.setRenderTarget(this.targets.final);
-    r.render(this.overlay, cam);
     if (this.steam.mesh.visible) {
-      r.setRenderTarget(this.targets.steam);
-      r.setClearColor(0x000000, 0);
-      r.clear(true, false, false);
-      r.render(this.steamScene, cam);
-      this.steamComposite.material.uniforms.uSrc.value = this.targets.steam.texture;
-      this.steamComposite.render(r, this.targets.final);
+      r.setRenderTarget(this.targets.steam); r.setClearColor(0x000000,0); r.clear(true,false,false);
+      r.render(this.steamScene,cam);
+      this.steamComposite.material.uniforms.uSrc.value=this.targets.steam.texture;
+      this.steamComposite.render(r,this.targets.final);
     }
 
     // ---- pass 4: post
-    const dbg = [null, this.waves.surfaceTexture, this.thermal.texture, this.condensation.texture, this.caustics.target.texture, this.topTarget.texture][this.debugMode] || null;
+    const dbg = [null, this.waves.surfaceTexture, this.thermal.texture][this.debugMode] || null;
     this.post.render(this.targets.final.texture, this.rw, this.rh, this.time, dbg, this.debugMode, this.camera.aspect);
   }
 }
@@ -537,16 +484,16 @@ const app = new App();
 window.app = app;
 
 // URL parameters for reproducible figures, e.g.
-//   ?cam=0,0.12,0.16,0,0.08,0&ui=0&temp=-25&ts=600&balls=0,4&debug=2
+//   ?cam=0,0.16,0.20,0,0.06,0&ui=0&balls=0,4&debug=1
 {
   const q = new URLSearchParams(location.search);
   const num = (k) => (q.has(k) ? q.get(k).split(',').map(Number) : null);
   const cam = num('cam');
   if (cam) app.view(cam.slice(0, 3), cam.length >= 6 ? cam.slice(3, 6) : undefined);
   if (q.get('ui') === '0') app.ui.setHidden(true);
+  if (q.has('debug')) app.ui.setDebug(+q.get('debug'));
   if (q.has('temp')) app.ui.setSource(+q.get('temp'));
-  if (q.has('ts')) app.thermal.timeScale = +q.get('ts');
-  if (q.has('debug')) app.debugMode = +q.get('debug');
+  if (q.has('ts')) app.thermal.timeScale = Math.max(1,Math.min(600,+q.get('ts')||120));
   if (q.has('quality')) app.setQuality(+q.get('quality'));
   const balls = num('balls');
   if (balls) balls.forEach((b, i) => setTimeout(() => app.dropBall(b), 300 + i * 400));

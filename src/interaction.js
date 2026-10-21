@@ -4,7 +4,7 @@ import { CUP } from './config.js';
 // Pointer interaction:
 //   drag a body          -> pick it up, move it (spring), release to drop/throw
 //   drag on the water    -> finger in the water (moving depression + wake)
-//   drag on the glass    -> slide the glass on the table (wipe tool / Shift: wipe moisture)
+//   drag on the glass    -> slide the glass on the table
 //   drag elsewhere       -> orbit the camera (OrbitControls)
 
 const _ray = new THREE.Ray();
@@ -93,13 +93,10 @@ export class Interaction {
     this.grabOffset = new THREE.Vector3();
     this.cupGrabY = 0;
     this.cupOffset = new THREE.Vector3();
-    this.shiftDown = false;
     this.pointer = new THREE.Vector2();
     canvas.addEventListener('pointerdown', (e) => this.down(e), { capture: true });
     window.addEventListener('pointermove', (e) => this.move(e));
     window.addEventListener('pointerup', (e) => this.up(e));
-    window.addEventListener('keydown', (e) => { if (e.key === 'Shift') this.shiftDown = true; });
-    window.addEventListener('keyup', (e) => { if (e.key === 'Shift') this.shiftDown = false; });
   }
 
   _ray(e) {
@@ -148,7 +145,6 @@ export class Interaction {
     const ray = this._ray(e);
     const hit = this._pick(ray);
     const app = this.app;
-    const wipe = this.tool === 'wipe' || e.shiftKey;
     if (hit.kind === 'ball') {
       this.mode = 'ball';
       this.ball = hit.ball;
@@ -161,24 +157,17 @@ export class Interaction {
       this.grabPlane.setFromNormalAndCoplanarPoint(n, p);
       this.grabOffset.copy(this.ball.pos).sub(p);
       this.ball.grabTarget.copy(this.ball.pos);
-    } else if (hit.kind === 'water' && !wipe) {
+    } else if (hit.kind === 'water') {
       this.mode = 'water';
       this.finger = hit.point.clone();
       this.prevFinger = hit.point.clone();
     } else if (hit.kind === 'glass' || hit.kind === 'rim') {
-      if (wipe && hit.kind === 'glass') {
-        this.mode = 'wipe';
-        this._wipeAt(hit.point);
-      } else {
-        this.mode = 'cup';
-        this.cupGrabY = hit.point.y;
-        this.grabPlane.set(new THREE.Vector3(0, 1, 0), -hit.point.y);
-        this.cupOffset.copy(app.cup.pos).sub(hit.point);
-        this.cupOffset.y = 0;
-        app.cup.dragging = true;
-      }
-    } else if (hit.kind === 'water' && wipe) {
-      this.mode = null;
+      this.mode = 'cup';
+      this.cupGrabY = hit.point.y;
+      this.grabPlane.set(new THREE.Vector3(0, 1, 0), -hit.point.y);
+      this.cupOffset.copy(app.cup.pos).sub(hit.point);
+      this.cupOffset.y = 0;
+      app.cup.dragging = true;
     }
     if (this.mode) {
       this.controls.enabled = false;
@@ -188,23 +177,14 @@ export class Interaction {
     }
   }
 
-  _wipeAt(p) {
-    const app = this.app;
-    const l = p.clone().sub(app.cup.pos);
-    let u = Math.atan2(l.z, l.x) / (Math.PI * 2);
-    if (u < 0) u += 1;
-    app.condensation.setWipe(u, l.y / CUP.height, true);
-  }
-
   move(e) {
     const ray = this._ray(e);
     if (!this.mode) {
       const hit = this._pick(ray);
-      const wipe = this.tool === 'wipe' || e.shiftKey;
       let cur = 'default';
       if (hit.kind === 'ball') cur = 'grab';
-      else if (hit.kind === 'water') cur = wipe ? 'default' : 'crosshair';
-      else if (hit.kind === 'glass') cur = wipe ? 'cell' : 'grab';
+      else if (hit.kind === 'water') cur = 'crosshair';
+      else if (hit.kind === 'glass') cur = 'grab';
       else if (hit.kind === 'rim') cur = 'grab';
       this.canvas.style.cursor = cur;
       return;
@@ -234,9 +214,6 @@ export class Interaction {
         app.cup.target.set(p.x + this.cupOffset.x, 0, p.z + this.cupOffset.z);
       }
       this.canvas.style.cursor = 'grabbing';
-    } else if (this.mode === 'wipe') {
-      const ch = rayCup(ray, app.cup.pos);
-      if (ch && ch.kind === 'side') this._wipeAt(ch.point);
     }
   }
 
@@ -244,7 +221,6 @@ export class Interaction {
     if (!this.mode) return;
     if (this.mode === 'ball' && this.ball) this.ball.grabbed = false;
     if (this.mode === 'cup') this.app.cup.dragging = false;
-    if (this.mode === 'wipe') this.app.condensation.setWipe(0, 0, false);
     this.mode = null;
     this.ball = null;
     this.finger = null;

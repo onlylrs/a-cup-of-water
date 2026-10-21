@@ -1,0 +1,17 @@
+import assert from 'node:assert/strict';
+import { HeatingSim } from '../src/physics/thermal.js';
+const heat = new HeatingSim();
+heat.envTemp = -25;
+assert.equal(heat.envTemp,22,'This build must not expose a freezer stage');
+heat.reset(-25);
+assert.ok(heat.T.every(Number.isFinite));
+heat.envTemp = 230;
+heat.timeScale = 120;
+for(let i=0;i<1500;i++) heat.step(1/30);
+assert.ok(heat.stats.meanT>90 && heat.stats.meanT<105,'Heating must produce near-boiling liquid, not a 230 C water reset');
+assert.ok(heat.stats.vaporPower>0,'Hot boundaries must produce vapour energy');
+assert.equal(heat.stats.iceFraction,0,'The heating-only scenario must remain unfrozen');
+assert.ok(heat.T.every(Number.isFinite),'All thermal cells must remain finite');
+heat.envTemp=22;heat.reset();heat.step(1/60);
+assert.ok(Math.abs(heat.stats.meanT-22)<1,'Reset must restore room-temperature water');
+console.log('PASS: stage bounds, heating to boiling, vapour generation, finite fields and room-water reset');

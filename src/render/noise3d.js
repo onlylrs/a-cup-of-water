@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { mulberry } from '../physics/bubbles.js';
+import { mulberry } from '../stage/random.js';
 
 // Tileable 3D value noise (3 independent channels, two octaves) for ice structure,
 // schlieren and surface roughness.

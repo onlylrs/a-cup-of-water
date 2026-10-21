@@ -281,3 +281,13 @@ select option { background: #1b1c1f; }
   .hint { display: none; }
   .title h1 { font-size: 22px; }
 }
+
+/* Liquid baseline presentation controls. */
+.balls { grid-template-columns: repeat(4, 1fr); }
+.scope-copy { margin: 0; font-size: 14px; line-height: 1.5; }
+.stage-label { position: absolute; left: 28px; bottom: 22px; max-width: 55vw; font-size: 12px; line-height: 1.4; color: rgba(233,231,227,.7); }
+
+.water-readout {font-size:17px;font-weight:500;color:var(--accent)}
+.panel .section {padding:10px 0}
+.panel .section h2 {margin-bottom:8px}
+.panel .note {font-size:10.5px}

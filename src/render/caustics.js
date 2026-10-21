@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { CUP, GRID } from '../config.js';
+import { CUP, GRID, LIMITS } from '../config.js';
 import { GLSL_HEADER } from './glsl/header.js';
 import COMMON from './glsl/common.glsl?raw';
 import { makeTarget, FullscreenPass, shaderMaterial } from './fsquad.js';
@@ -24,6 +24,22 @@ uniform vec4 uRect;
 uniform float uIorWater;
 uniform float uEtaMin, uEtaMax;
 uniform float uIce;
+uniform int uBallCount;
+uniform vec4 uBallPos[${LIMITS.maxBalls}];
+// Occlusion is evaluated along each refracted segment, rather than projecting
+// the raster sphere straight through the glass as an opaque shadow-map caster.
+float bodyTransmission(vec3 o, vec3 d, float len) {
+  for (int i=0; i<${LIMITS.maxBalls}; i++) {
+    if (i>=uBallCount) break;
+    vec3 oc=o-uBallPos[i].xyz;
+    float b=dot(oc,d), c=dot(oc,oc)-uBallPos[i].w*uBallPos[i].w;
+    float disc=b*b-c;
+    if (disc<0.0) continue;
+    float nearT=-b-sqrt(disc), farT=-b+sqrt(disc);
+    if (farT>1e-5 && nearT<len-1e-5) return 0.0;
+  }
+  return 1.0;
+}
 out vec3 vOld;
 out vec3 vNew;
 out vec3 vThr;
@@ -127,6 +143,7 @@ void main() {
 
   vec3 land = vOld;
   if (med >= 0) {
+    thr *= bodyTransmission(o,-uLightDir,length(p-o));
     for (int it = 0; it < 10; it++) {
       float w = float(it + 2);
       if (med == 1) {
@@ -165,6 +182,7 @@ void main() {
         float tS = marchSurface(p, d, 1e-6, tEnd, -1.0);
         int ev = tWall < tBase ? 0 : 1;
         if (tS > 0.0 && tS < tEnd) { tEnd = tS; ev = 2; }
+        thr *= bodyTransmission(p,d,tEnd);
         thr *= exp(-SIGMA_WATER * tEnd - iceOptical(p, d, tEnd));
         p += d * tEnd;
         if (ev == 2) {
@@ -182,6 +200,7 @@ void main() {
         float tWall = ci.y > 1e-6 ? ci.y : 1e9;
         float tS = marchSurface(p, d, 1e-6, tWall, 1.0);
         if (tS > 0.0 && tS < tWall) {
+          thr *= bodyTransmission(p,d,tS);
           p += d * tS;
           vec4 s = surfSample(p.xz);
           vec3 ns = normalize(vec3(-s.g, 1.0, -s.b));
@@ -191,6 +210,7 @@ void main() {
           p += d * 1e-5;
           med = 2; code += 13.0 * w;
         } else {
+          thr *= bodyTransmission(p,d,tWall);
           p += d * tWall;
           passIface(d, -vec3(p.x, 0.0, p.z) / R_IN, 1.0, N_GLASS, thr);
           med = 1; code += 14.0 * w;
@@ -286,6 +306,7 @@ export class Caustics {
         uLightV: { value: new THREE.Vector3() }, uLightOrigin: { value: new THREE.Vector3() },
         uExtent: { value: this.extent }, uRect: { value: new THREE.Vector4() },
         uIorWater: { value: 1.333 }, uEtaMin: { value: -0.004 }, uEtaMax: { value: 0.004 }, uIce: { value: 0 },
+        uBallCount: { value: 0 }, uBallPos: { value: Array.from({length:LIMITS.maxBalls},()=>new THREE.Vector4()) },
       },
       blending: THREE.CustomBlending,
       blendEquation: THREE.AddEquation,

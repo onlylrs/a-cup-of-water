@@ -52,6 +52,9 @@ export class Bubbles {
 
   clear() {
     this.list.length = 0;
+    this.count = 0;
+    this.data.fill(0);
+    this.texture.needsUpdate = true;
     for (const s of this.sites) s.bubble = null;
   }
 
